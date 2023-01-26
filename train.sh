@@ -16,4 +16,4 @@
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate testgpu
 
-srun python main.py --nEpochs 100
+srun python main.py --nEpochs 1000 --upscale_factor 8

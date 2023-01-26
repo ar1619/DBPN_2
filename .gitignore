@@ -2,3 +2,4 @@
 *.out
 *.pth
 MOD_png/*
+*.pyc

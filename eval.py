@@ -25,7 +25,7 @@ parser.add_argument('--input_dir', type=str, default='Input/')
 parser.add_argument('--output', default='Result/', help='Location to save output of SR model')
 parser.add_argument('--test_dataset', type=str, default='LR_16/')
 parser.add_argument('--residual', type=bool, default=False)
-parser.add_argument('--model', default='weights/MOD_ese-hivemindRes_16_RAK_epoch_899.pth', help='sr pretrained base model')
+parser.add_argument('--model', default='weights/MOD_ese-hivemindRes_16_RAK_epoch_999.pth', help='sr pretrained base model')
 
 opt = parser.parse_args()
 

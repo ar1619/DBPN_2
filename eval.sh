@@ -16,4 +16,4 @@
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate testgpu
 
-srun python eval.py --gpus 1
+srun python eval.py --gpus 1 --upscale_factor 8
