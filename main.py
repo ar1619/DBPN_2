@@ -9,10 +9,7 @@ import torch.optim as optim
 import torch.backends.cudnn as cudnn
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
-from dbpn import Net as DBPN
-from dbpn_v1 import Net as DBPNLL
-from dbpns import Net as DBPNS
-from dbpn_iterative import Net as DBPNITER
+from model import Net as DBPNLL
 from data import get_training_set, get_validation_set
 import pdb
 import socket
