@@ -15,7 +15,8 @@ def is_image_file(filename):
 
 def load_img(filepath):
     img = np.load(filepath)
-    img = np.expand_dims(im, axis = 2)
+    img = np.expand_dims(img, axis = 2)
+    img = np.float32(img)
     #y, _, _ = img.split()
     return img
 
@@ -26,7 +27,7 @@ def rescale_img(img_in, scale):
     return img_in
 
 def get_patch(img_in, img_tar, patch_size, scale, ix=-1, iy=-1):
-    (ih, iw) = img_in.size
+    (ih, iw) = img_in.shape[0], img_in.shape[1]
     (th, tw) = (scale * ih, scale * iw)
 
     patch_mult = scale #if len(scale) > 1 else 1
@@ -40,8 +41,8 @@ def get_patch(img_in, img_tar, patch_size, scale, ix=-1, iy=-1):
 
     (tx, ty) = (scale * ix, scale * iy)
 
-    img_in = img_in.crop((iy,ix,iy + ip, ix + ip))
-    img_tar = img_tar.crop((ty,tx,ty + tp, tx + tp))
+    img_in = img_in[iy:iy + ip, ix:ix + ip]
+    img_tar = img_tar[ty:ty + tp, tx:tx + tp]
                 
     info_patch = {
         'ix': ix, 'iy': iy, 'ip': ip, 'tx': tx, 'ty': ty, 'tp': tp}
@@ -80,7 +81,7 @@ class DatasetFromFolder(data.Dataset):
     def __getitem__(self, index):
         target = load_img(self.image_filenames[index])
         
-        input = pyramid_reduce(target, downscale=16, sigma=None, order=3, mode='reflect', cval=0, channel_axis=2)
+        input = pyramid_reduce(target, downscale=self.upscale_factor, sigma=None, order=3, mode='reflect', cval=0, channel_axis=2)
         
         input, target, _ = get_patch(input,target,self.patch_size, self.upscale_factor)
         
@@ -89,7 +90,6 @@ class DatasetFromFolder(data.Dataset):
         
         if self.transform:
             input = self.transform(input)
-            bicubic = self.transform(bicubic)
             target = self.transform(target)
                 
         return input, target
@@ -125,7 +125,7 @@ class DatasetFromFolderValid(data.Dataset):
 
     def __getitem__(self, index):
         target = load_img(self.image_filenames[index])
-        input = pyramid_reduce(target, downscale=16, sigma=None, order=3, mode='reflect', cval=0, channel_axis=2)
+        input = pyramid_reduce(target, downscale=self.upscale_factor, sigma=None, order=3, mode='reflect', cval=0, channel_axis=2)
         _, file = os.path.split(self.image_filenames[index])
         
         if self.transform:
