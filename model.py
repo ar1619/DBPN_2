@@ -8,13 +8,21 @@ class Net(nn.Module):
     def __init__(self, num_channels, base_filter, feat, num_stages, scale_factor):
         super(Net, self).__init__()
         
-        if scale_factor == 16:
-        	kernel = 20
-        	stride = 16
+        if scale_factor == 2:
+        	kernel = 6
+        	stride = 2
+        	padding = 2
+        elif scale_factor == 4:
+        	kernel = 8
+        	stride = 4
         	padding = 2
         elif scale_factor == 8:
         	kernel = 12
         	stride = 8
+        	padding = 2
+        elif scale_factor == 16:
+        	kernel = 20
+        	stride = 16
         	padding = 2
         
         #Initial Feature Extraction
@@ -91,19 +99,19 @@ class Net(nn.Module):
         
         concat_l = torch.cat((l, concat_l),1)
         h = self.up7(concat_l)
-
+        
         concat_h = torch.cat((h, concat_h),1)
         l = self.down7(concat_h)
         
         concat_l = torch.cat((l, concat_l),1)
         h = self.up8(concat_l)
-
+        
         concat_h = torch.cat((h, concat_h),1)
         l = self.down8(concat_h)
         
         concat_l = torch.cat((l, concat_l),1)
         h = self.up9(concat_l)
-
+        
         concat_h = torch.cat((h, concat_h),1)
         l = self.down9(concat_h)
         

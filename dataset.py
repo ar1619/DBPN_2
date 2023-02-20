@@ -30,7 +30,7 @@ def get_patch(img_in, img_tar, img_bic, patch_size, scale, ix=-1, iy=-1):
     patch_mult = scale #if len(scale) > 1 else 1
     tp = patch_mult * patch_size
     ip = tp // scale
-    
+
     if ix == -1:
         ix = random.randrange(0, iw - ip + 1)
     if iy == -1:
@@ -118,6 +118,26 @@ class DatasetFromFolderEval(data.Dataset):
             bicubic = self.transform(bicubic)
             
         return input, bicubic, file
+      
+    def __len__(self):
+        return len(self.image_filenames)
+    
+class DatasetFromFolderValid(data.Dataset):
+    def __init__(self, hr_dir, upscale_factor, transform=None):
+        super(DatasetFromFolderValid, self).__init__()
+        self.image_filenames = [join(hr_dir, x) for x in listdir(hr_dir) if is_image_file(x)]
+        self.upscale_factor = upscale_factor
+        self.transform = transform
+
+    def __getitem__(self, index):
+        target = load_img(self.image_filenames[index])
+        input = target.resize((int(target.size[0]/self.upscale_factor),int(target.size[1]/self.upscale_factor)), Image.BICUBIC)
+        _, file = os.path.split(self.image_filenames[index])
+        
+        if self.transform:
+            input = self.transform(input)
+            target = self.transform(target)
+        return input, target
       
     def __len__(self):
         return len(self.image_filenames)
