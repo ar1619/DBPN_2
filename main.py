@@ -20,8 +20,8 @@ import time
 
 # Training settings
 parser = argparse.ArgumentParser(description='PyTorch Super Res Example')
-parser.add_argument('--upscale_factor', type=int, default=8, help="super resolution upscale factor")
-parser.add_argument('--batchSize', type=int, default=16, help='training batch size')
+parser.add_argument('--upscale_factor', type=int, default=16, help="super resolution upscale factor")
+parser.add_argument('--batchSize', type=int, default=32, help='training batch size')
 parser.add_argument('--validBatchSize', type=int, default=1, help='validation batch size')
 parser.add_argument('--nEpochs', type=int, default=2000, help='number of epochs to train for')
 parser.add_argument('--snapshots', type=int, default=50, help='Snapshots')
@@ -33,16 +33,16 @@ parser.add_argument('--threads', type=int, default=1, help='number of threads fo
 parser.add_argument('--seed', type=int, default=123, help='random seed to use. Default=123')
 parser.add_argument('--gpus', default=1, type=int, help='number of gpu')
 parser.add_argument('--data_dir', type=str, default='')
-parser.add_argument('--data_augmentation', type=bool, default=True)
+parser.add_argument('--data_augmentation', type=bool, default=False)
 parser.add_argument('--hr_train_dataset', type=str, default='../DIV2K_train_HR')
-parser.add_argument('--hr_valid_dataset', type=str, default='../MOD_png_2_validate')
+parser.add_argument('--hr_valid_dataset', type=str, default='../MOD_tensor_validate')
 parser.add_argument('--model_type', type=str, default='DBPNLL')
 parser.add_argument('--residual', type=bool, default=False)
-parser.add_argument('--patch_size', type=int, default=40, help='Size of cropped HR image')
+parser.add_argument('--patch_size', type=int, default=32, help='Size of cropped HR image')
 parser.add_argument('--pretrained_sr', default='MIX2K_LR_aug_x4dl10DBPNITERtpami_epoch_399.pth', help='sr pretrained base model')
-parser.add_argument('--pretrained', type=bool, default=True)
+parser.add_argument('--pretrained', type=bool, default=False)
 parser.add_argument('--save_folder', default='weights/', help='Location to save checkpoint models')
-parser.add_argument('--prefix', default='replicate_16_MOD', help='Location to save checkpoint models')
+parser.add_argument('--prefix', default='1channel_16_MOD', help='Location to save checkpoint models')
 
 opt = parser.parse_args()
 gpus_list = range(opt.gpus)
@@ -55,18 +55,14 @@ def train(epoch):
     epoch_val_loss = 0
     for iteration, batch in enumerate(training_data_loader, 1):
         model.train()
-        input, target, bicubic = Variable(batch[0]), Variable(batch[1]), Variable(batch[2])
+        input, target = Variable(batch[0]), Variable(batch[1])
         if cuda:
             input = input.cuda(gpus_list[0])
             target = target.cuda(gpus_list[0])
-            bicubic = bicubic.cuda(gpus_list[0])
 
         optimizer.zero_grad()
         t0 = time.time()
         prediction = model(input)
-
-        if opt.residual:
-            prediction = prediction + bicubic
 
         loss = criterion(prediction, target)
         t1 = time.time()
@@ -140,11 +136,7 @@ validation_data_loader = DataLoader(dataset=valid_set, num_workers=opt.threads, 
 
 print('===> Building model ', opt.model_type)
 if opt.model_type == 'DBPNLL':
-    model = DBPNLL(num_channels=3, base_filter=64,  feat = 256, num_stages=10, scale_factor=opt.upscale_factor) 
-elif opt.model_type == 'DBPN-RES-MR64-3':
-    model = DBPNITER(num_channels=3, base_filter=64,  feat = 256, num_stages=3, scale_factor=opt.upscale_factor)
-else:
-    model = DBPN(num_channels=3, base_filter=64,  feat = 256, num_stages=7, scale_factor=opt.upscale_factor) 
+    model = DBPNLL(num_channels=1, base_filter=64,  feat = 256, num_stages=10, scale_factor=opt.upscale_factor)
     
 model = torch.nn.DataParallel(model, device_ids=gpus_list)
 criterion = nn.MSELoss()

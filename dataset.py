@@ -5,15 +5,17 @@ import os
 from os import listdir
 from os.path import join
 from PIL import Image, ImageOps
+from skimage.transform import pyramid_reduce
 import random
 from random import randrange
 
 def is_image_file(filename):
-    return any(filename.endswith(extension) for extension in [".png", ".jpg", ".jpeg"])
+    return any(filename.endswith(extension) for extension in [".png", ".jpg", ".jpeg", ".npy"])
 
 
 def load_img(filepath):
-    img = Image.open(filepath).convert('RGB')
+    img = np.load(filepath)
+    img = np.expand_dims(im, axis = 2)
     #y, _, _ = img.split()
     return img
 
@@ -23,7 +25,7 @@ def rescale_img(img_in, scale):
     img_in = img_in.resize(new_size_in, resample=Image.BICUBIC)
     return img_in
 
-def get_patch(img_in, img_tar, img_bic, patch_size, scale, ix=-1, iy=-1):
+def get_patch(img_in, img_tar, patch_size, scale, ix=-1, iy=-1):
     (ih, iw) = img_in.size
     (th, tw) = (scale * ih, scale * iw)
 
@@ -40,32 +42,28 @@ def get_patch(img_in, img_tar, img_bic, patch_size, scale, ix=-1, iy=-1):
 
     img_in = img_in.crop((iy,ix,iy + ip, ix + ip))
     img_tar = img_tar.crop((ty,tx,ty + tp, tx + tp))
-    img_bic = img_bic.crop((ty,tx,ty + tp, tx + tp))
                 
     info_patch = {
         'ix': ix, 'iy': iy, 'ip': ip, 'tx': tx, 'ty': ty, 'tp': tp}
 
-    return img_in, img_tar, img_bic, info_patch
+    return img_in, img_tar, info_patch
 
-def augment(img_in, img_tar, img_bic, flip_h=True, rot=True):
+def augment(img_in, img_tar, flip_h=True, rot=True):
     info_aug = {'flip_h': False, 'flip_v': False, 'trans': False}
     
     if random.random() < 0.5 and flip_h:
         img_in = ImageOps.flip(img_in)
         img_tar = ImageOps.flip(img_tar)
-        img_bic = ImageOps.flip(img_bic)
         info_aug['flip_h'] = True
 
     if rot:
         if random.random() < 0.5:
             img_in = ImageOps.mirror(img_in)
             img_tar = ImageOps.mirror(img_tar)
-            img_bic = ImageOps.mirror(img_bic)
             info_aug['flip_v'] = True
         if random.random() < 0.5:
             img_in = img_in.rotate(180)
             img_tar = img_tar.rotate(180)
-            img_bic = img_bic.rotate(180)
             info_aug['trans'] = True
             
     return img_in, img_tar, img_bic, info_aug
@@ -82,20 +80,19 @@ class DatasetFromFolder(data.Dataset):
     def __getitem__(self, index):
         target = load_img(self.image_filenames[index])
         
-        input = target.resize((int(target.size[0]/self.upscale_factor),int(target.size[1]/self.upscale_factor)), Image.BICUBIC)       
-        bicubic = rescale_img(input, self.upscale_factor)
+        input = pyramid_reduce(target, downscale=16, sigma=None, order=3, mode='reflect', cval=0, channel_axis=2)
         
-        input, target, bicubic, _ = get_patch(input,target,bicubic,self.patch_size, self.upscale_factor)
+        input, target, _ = get_patch(input,target,self.patch_size, self.upscale_factor)
         
         if self.data_augmentation:
-            input, target, bicubic, _ = augment(input, target, bicubic)
+            input, target, _ = augment(input, target)
         
         if self.transform:
             input = self.transform(input)
             bicubic = self.transform(bicubic)
             target = self.transform(target)
                 
-        return input, target, bicubic
+        return input, target
 
     def __len__(self):
         return len(self.image_filenames)
@@ -110,14 +107,11 @@ class DatasetFromFolderEval(data.Dataset):
     def __getitem__(self, index):
         input = load_img(self.image_filenames[index])
         _, file = os.path.split(self.image_filenames[index])
-
-        bicubic = rescale_img(input, self.upscale_factor)
         
         if self.transform:
             input = self.transform(input)
-            bicubic = self.transform(bicubic)
             
-        return input, bicubic, file
+        return input, file
       
     def __len__(self):
         return len(self.image_filenames)
@@ -131,7 +125,7 @@ class DatasetFromFolderValid(data.Dataset):
 
     def __getitem__(self, index):
         target = load_img(self.image_filenames[index])
-        input = target.resize((int(target.size[0]/self.upscale_factor),int(target.size[1]/self.upscale_factor)), Image.BICUBIC)
+        input = pyramid_reduce(target, downscale=16, sigma=None, order=3, mode='reflect', cval=0, channel_axis=2)
         _, file = os.path.split(self.image_filenames[index])
         
         if self.transform:
