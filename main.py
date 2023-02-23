@@ -37,7 +37,7 @@ parser.add_argument('--model_type', type=str, default='DBPNLL')
 parser.add_argument('--residual', type=bool, default=False)
 parser.add_argument('--patch_size', type=int, default=32, help='Size of cropped HR image')
 parser.add_argument('--pretrained_sr', default='MIX2K_LR_aug_x4dl10DBPNITERtpami_epoch_399.pth', help='sr pretrained base model')
-parser.add_argument('--pretrained', type=bool, default=False)
+parser.add_argument('--pretrained', type=bool, default=True)
 parser.add_argument('--save_folder', default='weights/', help='Location to save checkpoint models')
 parser.add_argument('--prefix', default='1channel_16_MOD', help='Location to save checkpoint models')
 
