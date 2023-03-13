@@ -137,6 +137,7 @@ if opt.model_type == 'DBPNLL':
     
 model = torch.nn.DataParallel(model, device_ids=gpus_list)
 criterion = nn.MSELoss()
+#New loss bitch
 
 print('---------- Networks architecture -------------')
 print_network(model)
