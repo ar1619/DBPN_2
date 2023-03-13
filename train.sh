@@ -3,7 +3,7 @@
 #SBATCH --job-name=1_channel_4
 #SBATCH -e training-%j.err
 #SBATCH -o training-%j.out
-#SBATCH --mem-per-cpu=1000
+#SBATCH --mem-per-cpu=1500
 #SBATCH --time=0-24:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1

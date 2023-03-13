@@ -82,13 +82,22 @@ class DatasetFromFolder(data.Dataset):
         target = load_img(self.image_filenames[index])
         if self.upscale_factor == 2:
             random_factor = np.random.choice([1, 2, 4, 8], p=[0.25, 0.25, 0.25, 0.25])
-            input = pyramid_reduce(target, downscale=random_factor*2, sigma=None, order=3, mode='reflect', cval=0, channel_axis=2)
-            target = pyramid_reduce(target, downscale=random_factor, sigma=None, order=3, mode='reflect', cval=0, channel_axis=2)
+            if random_factor == 1:
+                input = pyramid_reduce(target, downscale=self.upscale_factor, sigma=None, order=3, mode='constant', cval=0, channel_axis=2)
+            else:
+                input = pyramid_reduce(target, downscale=random_factor*2, sigma=None, order=3, mode='constant', cval=0, channel_axis=2)
+                target = pyramid_reduce(target, downscale=random_factor, sigma=None, order=3, mode='constant', cval=0, channel_axis=2)
 
         elif self.upscale_factor == 4:
             random_factor = np.random.choice([1, 2, 4], p=[0.34, 0.33, 0.33])
-            input = pyramid_reduce(target, downscale=random_factor*4, sigma=None, order=3, mode='reflect', cval=0, channel_axis=2)
-            target = pyramid_reduce(target, downscale=random_factor, sigma=None, order=3, mode='reflect', cval=0, channel_axis=2)
+            if random_factor == 1:
+                input = pyramid_reduce(target, downscale=self.upscale_factor, sigma=None, order=3, mode='constant', cval=0, channel_axis=2)
+            else:
+                input = pyramid_reduce(target, downscale=random_factor*4, sigma=None, order=3, mode='constant', cval=0, channel_axis=2)
+                target = pyramid_reduce(target, downscale=random_factor, sigma=None, order=3, mode='constant', cval=0, channel_axis=2)
+
+        else:
+            input = pyramid_reduce(target, downscale=self.upscale_factor, sigma=None, order=3, mode='constant', cval=0, channel_axis=2)
         
         input, target, _ = get_patch(input,target,self.patch_size, self.upscale_factor)
         
