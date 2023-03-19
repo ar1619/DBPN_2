@@ -40,6 +40,7 @@ parser.add_argument('--pretrained_sr', default='MIX2K_LR_aug_x4dl10DBPNITERtpami
 parser.add_argument('--pretrained', type=bool, default=True)
 parser.add_argument('--save_folder', default='weights/', help='Location to save checkpoint models')
 parser.add_argument('--prefix', default='1channel_16_MOD', help='Location to save checkpoint models')
+parser.add_argument('--weight_decay', type=float, default=10, help='Weight decay')
 
 opt = parser.parse_args()
 gpus_list = range(opt.gpus)
@@ -154,7 +155,7 @@ if cuda:
     model = model.cuda(gpus_list[0])
     criterion = criterion.cuda(gpus_list[0])
 
-optimizer = optim.Adam(model.parameters(), lr=opt.lr, betas=(0.9, 0.999), eps=1e-8)
+optimizer = optim.Adam(model.parameters(), lr=opt.lr, betas=(0.9, 0.999), eps=1e-8, weight_decay = opt.weight_decay)
 best_val_loss = 100000
 i = 0
 for epoch in range(opt.start_iter, opt.nEpochs + 1):
