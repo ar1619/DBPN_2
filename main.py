@@ -25,7 +25,7 @@ parser.add_argument('--snapshots', type=int, default=50, help='Snapshots')
 parser.add_argument('--start_iter', type=int, default=1, help='Starting Epoch')
 parser.add_argument('--lr', type=float, default=1e-4, help='Learning Rate. Default=0.01')
 parser.add_argument('--gpu_mode', type=bool, default=True)
-parser.add_argument('--patience', type=int, default=4, help='patience value for early stopping')
+parser.add_argument('--patience', type=int, default=30, help='patience value for early stopping')
 parser.add_argument('--threads', type=int, default=1, help='number of threads for data loader to use')
 parser.add_argument('--seed', type=int, default=123, help='random seed to use. Default=123')
 parser.add_argument('--gpus', default=1, type=int, help='number of gpu')
@@ -37,10 +37,10 @@ parser.add_argument('--model_type', type=str, default='DBPNLL')
 parser.add_argument('--residual', type=bool, default=False)
 parser.add_argument('--patch_size', type=int, default=32, help='Size of cropped HR image')
 parser.add_argument('--pretrained_sr', default='MIX2K_LR_aug_x4dl10DBPNITERtpami_epoch_399.pth', help='sr pretrained base model')
-parser.add_argument('--pretrained', type=bool, default=True)
+parser.add_argument('--pretrained', type=bool, default=False)
 parser.add_argument('--save_folder', default='weights/', help='Location to save checkpoint models')
 parser.add_argument('--prefix', default='1channel_16_MOD', help='Location to save checkpoint models')
-parser.add_argument('--weight_decay', type=float, default=10, help='Weight decay')
+#parser.add_argument('--weight_decay', type=float, default=0.0001, help='Weight decay')
 
 opt = parser.parse_args()
 gpus_list = range(opt.gpus)
@@ -70,26 +70,26 @@ def train(epoch):
         
         print("===> Epoch[{}]({}/{}): Loss: {:.4f} || Timer: {:.4f} sec.".format(epoch, iteration, len(training_data_loader), loss.data, (t1 - t0)))
         
-    model.eval()
-    with torch.no_grad():
-        for iteration, batch in enumerate(validation_data_loader, 1):
-            input, target= Variable(batch[0]), Variable(batch[1])
-            if cuda:
-                input = input.cuda(gpus_list[0])
-                target = target.cuda(gpus_list[0])
+#    model.eval()
+#    with torch.no_grad():
+#        for iteration, batch in enumerate(validation_data_loader, 1):
+#            input, target= Variable(batch[0]), Variable(batch[1])
+#            if cuda:
+#                input = input.cuda(gpus_list[0])
+#                target = target.cuda(gpus_list[0])
 
-            t0 = time.time()
-            prediction = model(input)
+#            t0 = time.time()
+#            prediction = model(input)
 
-            loss_val = criterion(prediction, target)
-            t1 = time.time()
-            epoch_val_loss += loss_val.data
+#            loss_val = criterion(prediction, target)
+#            t1 = time.time()
+#            epoch_val_loss += loss_val.data
             
-        val_loss = epoch_val_loss / len(validation_data_loader)
+#        val_loss = epoch_val_loss / len(validation_data_loader)
 
     print("===> Epoch {} Training: Avg. Loss: {:.4f}".format(epoch, epoch_loss / len(training_data_loader)))
-    print("===> Epoch {} Validation: Avg. Loss: {:.4f}".format(epoch, val_loss))
-    return val_loss
+#    print("===> Epoch {} Validation: Avg. Loss: {:.4f}".format(epoch, val_loss))
+#    return val_loss
 
 def test():
     avg_psnr = 0
@@ -129,15 +129,16 @@ print('===> Loading datasets')
 train_set = get_training_set(opt.data_dir, opt.hr_train_dataset, opt.upscale_factor, opt.patch_size, opt.data_augmentation)
 training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=True)
 
-valid_set = get_validation_set(opt.data_dir, opt.hr_valid_dataset, opt.upscale_factor)
-validation_data_loader = DataLoader(dataset=valid_set, num_workers=opt.threads, batch_size=opt.validBatchSize, shuffle=False)
+#valid_set = get_validation_set(opt.data_dir, opt.hr_valid_dataset, opt.upscale_factor)
+#validation_data_loader = DataLoader(dataset=valid_set, num_workers=opt.threads, batch_size=opt.validBatchSize, shuffle=False)
 
 print('===> Building model ', opt.model_type)
 if opt.model_type == 'DBPNLL':
     model = DBPNLL(num_channels=1, base_filter=64,  feat = 256, num_stages=10, scale_factor=opt.upscale_factor)
     
 model = torch.nn.DataParallel(model, device_ids=gpus_list)
-criterion = nn.MSELoss()
+#criterion = nn.MSELoss()
+criterion = nn.L1Loss()
 #New loss bitch
 
 print('---------- Networks architecture -------------')
@@ -155,24 +156,27 @@ if cuda:
     model = model.cuda(gpus_list[0])
     criterion = criterion.cuda(gpus_list[0])
 
-optimizer = optim.Adam(model.parameters(), lr=opt.lr, betas=(0.9, 0.999), eps=1e-8, weight_decay = opt.weight_decay)
-best_val_loss = 100000
+optimizer = optim.Adam(model.parameters(), lr=opt.lr, betas=(0.9, 0.999), eps=1e-8)
+#best_val_loss = 100000
 i = 0
 for epoch in range(opt.start_iter, opt.nEpochs + 1):
-    val_loss = train(epoch)
-    if val_loss >= best_val_loss:
-        i += 1
-    else:
-        i = 0
-        best_val_loss = val_loss
-        checkpoint(epoch)
+    train(epoch)
+    #val_loss = train(epoch)
+    #if val_loss >= best_val_loss:
+    #    i += 1
+    #else:
+    #    i = 0
+    #    checkpoint(epoch)
+    #    best_val_loss = val_loss
 
     # learning rate is decayed by a factor of 10 every half of total epochs
     if (epoch+1) % (opt.nEpochs/2) == 0:
         for param_group in optimizer.param_groups:
             param_group['lr'] /= 10.0
         print('Learning rate decay: lr={}'.format(optimizer.param_groups[0]['lr']))
-        
+
+    if epoch % 5 == 0:
+        checkpoint(epoch)    
     if i == opt.patience:
         print('Loss stopped improving at epoch N: {}'.format(epoch))
         break
