@@ -77,11 +77,17 @@ class DatasetFromFolder(data.Dataset):
         self.upscale_factor = upscale_factor
         self.transform = transform
         self.data_augmentation = data_augmentation
+        if self.upscale_factor == 2:
+            self.random_factor = np.random.choice([1, 2, 4, 8], len(self.image_filenames), p=[0.25, 0.25, 0.25, 0.25])
+        elif self.upscale_factor == 4:
+            self.random_factor = np.random.choice([1, 2, 4], len(self.image_filenames), p=[0.34, 0.33, 0.33])
+        else:
+            self.random_factor = 1
 
     def __getitem__(self, index):
         target = load_img(self.image_filenames[index])
         if self.upscale_factor == 2:
-            random_factor = np.random.choice([1, 2, 4, 8], p=[0.25, 0.25, 0.25, 0.25])
+            random_factor = self.random_factor[index]
             if random_factor == 1:
                 input = pyramid_reduce(target, downscale=self.upscale_factor, sigma=None, order=3, mode='constant', cval=0, channel_axis=2)
             else:
@@ -89,7 +95,7 @@ class DatasetFromFolder(data.Dataset):
                 target = pyramid_reduce(target, downscale=random_factor, sigma=None, order=3, mode='constant', cval=0, channel_axis=2)
 
         elif self.upscale_factor == 4:
-            random_factor = np.random.choice([1, 2, 4], p=[0.34, 0.33, 0.33])
+            random_factor = self.random_factor[index]
             if random_factor == 1:
                 input = pyramid_reduce(target, downscale=self.upscale_factor, sigma=None, order=3, mode='constant', cval=0, channel_axis=2)
             else:
