@@ -8,6 +8,7 @@ from PIL import Image, ImageOps
 from skimage.transform import pyramid_reduce
 import random
 from random import randrange
+from maskedtensor import masked_tensor
 
 def is_image_file(filename):
     return any(filename.endswith(extension) for extension in [".png", ".jpg", ".jpeg", ".npy"])
@@ -68,9 +69,18 @@ def augment(img_in, img_tar, flip_h=True, rot=True):
             info_aug['trans'] = True
             
     return img_in, img_tar, img_bic, info_aug
+
+def mask_input(inp_batch):
+    nb_mask = inp_batch.size(0)
+    
+    for i in range(nb_mask):
+        img = inp_batch[i]
+        mask = torch.rand(img.size()) > 0.9
+        inp_batch[i] = masked_tensor(img, mask)
+    return inp_batch
     
 class DatasetFromFolder(data.Dataset):
-    def __init__(self, image_dir, patch_size, upscale_factor, data_augmentation, transform=None):
+    def __init__(self, image_dir, patch_size, upscale_factor, data_augmentation, transform=None, observation_type="training", observation = None):
         super(DatasetFromFolder, self).__init__()
         self.image_filenames = [join(image_dir, x) for x in listdir(image_dir) if is_image_file(x)]
         self.patch_size = patch_size
@@ -83,6 +93,9 @@ class DatasetFromFolder(data.Dataset):
             self.random_factor = np.random.choice([1, 2, 4], len(self.image_filenames), p=[0.34, 0.33, 0.33])
         else:
             self.random_factor = 1
+        
+        self.observation_type = observation_type
+        self.observation = observation
 
     def __getitem__(self, index):
         target = load_img(self.image_filenames[index])
@@ -113,8 +126,11 @@ class DatasetFromFolder(data.Dataset):
         if self.transform:
             input = self.transform(input)
             target = self.transform(target)
+
+        if self.observation_type == "training":
+            self.observation = mask_input(input)
                 
-        return input, target
+        return input, target, self.observation
 
     def __len__(self):
         return len(self.image_filenames)

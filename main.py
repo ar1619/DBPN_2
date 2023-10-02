@@ -10,7 +10,7 @@ import torch.backends.cudnn as cudnn
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from model import Net as DBPNLL
-from data import get_training_set, get_validation_set
+from data import get_training_set
 import pdb
 import socket
 import time
@@ -53,14 +53,15 @@ def train(epoch):
     epoch_val_loss = 0
     for iteration, batch in enumerate(training_data_loader, 1):
         model.train()
-        input, target = Variable(batch[0]), Variable(batch[1])
+        input, target, observation = Variable(batch[0]), Variable(batch[1]), Variable(batch[2])
         if cuda:
             input = input.cuda(gpus_list[0])
             target = target.cuda(gpus_list[0])
+            observation = observation.cuda(gpus_list[0])
 
         optimizer.zero_grad()
         t0 = time.time()
-        prediction = model(input)
+        prediction = model(input, observation)
 
         loss = criterion(prediction, target)
         t1 = time.time()
@@ -91,19 +92,19 @@ def train(epoch):
 #    print("===> Epoch {} Validation: Avg. Loss: {:.4f}".format(epoch, val_loss))
 #    return val_loss
 
-def test():
-    avg_psnr = 0
-    for batch in testing_data_loader:
-        input, target = Variable(batch[0]), Variable(batch[1])
-        if cuda:
-            input = input.cuda(gpus_list[0])
-            target = target.cuda(gpus_list[0])
+# def test():
+#     avg_psnr = 0
+#     for batch in testing_data_loader:
+#         input, target = Variable(batch[0]), Variable(batch[1])
+#         if cuda:
+#             input = input.cuda(gpus_list[0])
+#             target = target.cuda(gpus_list[0])
 
-        prediction = model(input)
-        mse = criterion(prediction, target)
-        psnr = 10 * log10(1 / mse.data[0])
-        avg_psnr += psnr
-    print("===> Avg. PSNR: {:.4f} dB".format(avg_psnr / len(testing_data_loader)))
+#         prediction = model(input)
+#         mse = criterion(prediction, target)
+#         psnr = 10 * log10(1 / mse.data[0])
+#         avg_psnr += psnr
+#     print("===> Avg. PSNR: {:.4f} dB".format(avg_psnr / len(testing_data_loader)))
 
 def print_network(net):
     num_params = 0
