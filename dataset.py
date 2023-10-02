@@ -136,20 +136,24 @@ class DatasetFromFolder(data.Dataset):
         return len(self.image_filenames)
 
 class DatasetFromFolderEval(data.Dataset):
-    def __init__(self, lr_dir, upscale_factor, transform=None):
+    def __init__(self, lr_dir, obs_dir, upscale_factor, transform=None):
         super(DatasetFromFolderEval, self).__init__()
-        self.image_filenames = [join(lr_dir, x) for x in listdir(lr_dir) if is_image_file(x)]
+        self.lr_dir = lr_dir
+        self.obs_dir = obs_dir
+        self.image_filenames = [x for x in listdir(lr_dir) if is_image_file(x)]
         self.upscale_factor = upscale_factor
         self.transform = transform
 
     def __getitem__(self, index):
-        input = load_img(self.image_filenames[index])
+        input = load_img(self.lr_dir+self.image_filenames[index])
+        observation = load_img(self.obs_dir+self.image_filenames[index])
         _, file = os.path.split(self.image_filenames[index])
         
         if self.transform:
             input = self.transform(input)
-            
-        return input, file
+            observation = self.transform(observation)
+                
+        return input, observation
       
     def __len__(self):
         return len(self.image_filenames)
