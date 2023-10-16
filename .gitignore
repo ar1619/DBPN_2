@@ -1,5 +1,9 @@
 *.err
 *.out
 *.pth
+*.png
+*.npy
 MOD_png/*
 *.pyc
+Input/*
+Results/*
