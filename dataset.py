@@ -6,6 +6,7 @@ from os import listdir
 from os.path import join
 from PIL import Image, ImageOps
 from skimage.transform import pyramid_reduce
+import skimage
 import random
 from random import randrange
 from maskedtensor import masked_tensor
@@ -15,7 +16,8 @@ def is_image_file(filename):
 
 
 def load_img(filepath):
-    img = np.load(filepath)
+    img = Image.open(filepath).convert('L')
+    img = np.array(img)
     img = np.expand_dims(img, axis = 2)
     img = np.float32(img)
     #y, _, _ = img.split()
@@ -76,7 +78,7 @@ def mask_input(inp_batch):
     for i in range(nb_mask):
         img = inp_batch[i]
         mask = torch.rand(img.size()) > 0.9
-        inp_batch[i] = masked_tensor(img, mask)
+        #inp_batch[i] = masked_tensor(img, mask)
     return inp_batch
     
 class DatasetFromFolder(data.Dataset):
@@ -102,10 +104,10 @@ class DatasetFromFolder(data.Dataset):
         if self.upscale_factor == 2:
             random_factor = self.random_factor[index]
             if random_factor == 1:
-                input = pyramid_reduce(target, downscale=self.upscale_factor, sigma=None, order=3, mode='constant', cval=0, channel_axis=2)
+                input = skimage.transform.pyramid_reduce(target, downscale=self.upscale_factor, sigma=None, order=3, mode='constant', cval=0, channel_axis=2)
             else:
-                input = pyramid_reduce(target, downscale=random_factor*2, sigma=None, order=3, mode='constant', cval=0, channel_axis=2)
-                target = pyramid_reduce(target, downscale=random_factor, sigma=None, order=3, mode='constant', cval=0, channel_axis=2)
+                input = skimage.transform.pyramid_reduce(target, downscale=random_factor*2, sigma=None, order=3, mode='constant', cval=0, channel_axis=2)
+                target = skimage.transform.pyramid_reduce(target, downscale=random_factor, sigma=None, order=3, mode='constant', cval=0, channel_axis=2)
 
         elif self.upscale_factor == 4:
             random_factor = self.random_factor[index]
@@ -128,7 +130,7 @@ class DatasetFromFolder(data.Dataset):
             target = self.transform(target)
 
         if self.observation_type == "training":
-            self.observation = mask_input(input)
+            self.observation = mask_input(target)
                 
         return input, target, self.observation
 
@@ -136,9 +138,10 @@ class DatasetFromFolder(data.Dataset):
         return len(self.image_filenames)
 
 class DatasetFromFolderEval(data.Dataset):
-    def __init__(self, lr_dir, obs_dir, upscale_factor, transform=None):
+    def __init__(self, lr_dir, upscale_factor, obs_dir = "", observations = False, transform=None):
         super(DatasetFromFolderEval, self).__init__()
         self.lr_dir = lr_dir
+        self.observations = observations
         self.obs_dir = obs_dir
         self.image_filenames = [x for x in listdir(lr_dir) if is_image_file(x)]
         self.upscale_factor = upscale_factor
@@ -146,12 +149,14 @@ class DatasetFromFolderEval(data.Dataset):
 
     def __getitem__(self, index):
         input = load_img(self.lr_dir+self.image_filenames[index])
-        observation = load_img(self.obs_dir+self.image_filenames[index])
+        if self.observations:
+            observation = load_img(self.obs_dir+self.image_filenames[index])
         _, file = os.path.split(self.image_filenames[index])
         
         if self.transform:
             input = self.transform(input)
-            observation = self.transform(observation)
+            if self.observations:
+                observation = self.transform(observation)
                 
         return input, observation
       

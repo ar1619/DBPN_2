@@ -9,9 +9,9 @@ import torch.optim as optim
 import torch.backends.cudnn as cudnn
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
-from model import Net as DBPNLL
+from model_2_input import Net as DBPNLL
 from data import get_training_set
-import pdb
+#import pdb
 import socket
 import time
 
@@ -114,7 +114,8 @@ def print_network(net):
     print('Total number of parameters: %d' % num_params)
 
 def checkpoint(epoch):
-    model_out_path = opt.save_folder+opt.hr_train_dataset+hostname+opt.model_type+opt.prefix+".pth"
+    train_dataset = "2_inputs"
+    model_out_path = opt.save_folder+train_dataset+hostname+opt.model_type+opt.prefix+".pth"
     torch.save(model.state_dict(), model_out_path)
     print("Checkpoint saved to {}".format(model_out_path))
 
