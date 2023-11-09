@@ -51,7 +51,7 @@ if cuda:
 
 #print('===> Loading datasets')
 test_set = get_eval_set(os.path.join(opt.input_dir,opt.test_dataset), opt.upscale_factor)
-testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=opt.testBatchSize, shuffle=True)
+testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=opt.testBatchSize, shuffle=False)
 
 #print('===> Building model')
 if opt.model_type == 'DBPNLL':
@@ -74,11 +74,11 @@ def eval():
     model.eval()
     for batch in testing_data_loader:
         with torch.no_grad():
-            input, name = Variable(batch[0][:,:,300:341,226:287]), batch[1]
+            input, name = Variable(batch[0]), batch[1]
         if cuda:
             input = input.cuda(gpus_list[0])
-        print(name[0])
-        #t0 = time.time()
+
+        t0 = time.time()
         # if opt.chop_forward:
         #     with torch.no_grad():
         #         prediction = chop_forward(input, model, opt.upscale_factor)
@@ -88,19 +88,16 @@ def eval():
         #             prediction = x8_forward(input, model)
         #     else:
         #         with torch.no_grad():
-        #if name[0] not in alreadysaved:
         with torch.no_grad():
-            print(input.size())
             prediction = model(input)
                 
         # if opt.residual:
         #     prediction = prediction + bicubic
 
-        #t1 = time.time()
-
+        t1 = time.time()
         #print("===> Processing: %s || Timer: %.4f sec." % (name[0], (t1 - t0)))
-        #print(name[0])
-            save_img(prediction.cpu().data, name[0])
+        print(name[0])
+        save_img(prediction.cpu().data, name[0])
 
 def save_img(img, img_name):
     save_img = img.squeeze().numpy().transpose(0,1)
@@ -201,6 +198,4 @@ def chop_forward(x, model, scale, shave=8, min_size=80000, nGPUs=opt.gpus):
     return output
 
 ##Eval Start!!!!
-
-alreadysaved = os.listdir(os.path.join(opt.output,opt.test_dataset))
 eval()

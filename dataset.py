@@ -7,6 +7,7 @@ from os.path import join
 from PIL import Image, ImageOps
 from skimage.transform import pyramid_reduce
 import random
+import time
 from random import randrange
 
 def is_image_file(filename):
@@ -14,6 +15,7 @@ def is_image_file(filename):
 
 
 def load_img(filepath):
+    time.sleep(0.01)
     img = np.load(filepath)
     img = np.expand_dims(img, axis = 2)
     img = np.float32(img)
