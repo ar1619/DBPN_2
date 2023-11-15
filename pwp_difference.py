@@ -36,7 +36,7 @@ opt = parser.parse_args()
 gpus_list=range(opt.gpus)
 print(opt)
 
-train_test = True
+train_test = False
 
 cuda = opt.gpu_mode
 if cuda and not torch.cuda.is_available():
@@ -74,7 +74,6 @@ if cuda:
 
 def eval(filename):
     # list_of_days = ['20160114_diff.npy','20161014_diff.npy','20160812_diff.npy','20160418_diff.npy']
-    final_array = np.zeros((len(list_of_days), len(pwp_coord)))
     day = 0
     list_of_days = ['20160114_diff.npy', '20160117_diff.npy', '20160214_diff.npy', '20160111_diff.npy',
                     '20160313_diff.npy', '20160310_diff.npy', '20160414_diff.npy', '20160417_diff.npy',
@@ -82,6 +81,7 @@ def eval(filename):
                     '20160714_diff.npy', '20160717_diff.npy', '20160811_diff.npy', '20160814_diff.npy',
                     '20160915_diff.npy', '20160918_diff.npy', '20161013_diff.npy', '20161016_diff.npy',
                     '20161113_diff.npy', '20161110_diff.npy', '20161215_diff.npy', '20161218_diff.npy']
+    final_array = np.zeros((len(list_of_days), len(pwp_coord)))
     model.eval()
     for batch in testing_data_loader:
         t0 = time.time()
