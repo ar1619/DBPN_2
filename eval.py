@@ -74,11 +74,11 @@ def eval():
     model.eval()
     for batch in testing_data_loader:
         with torch.no_grad():
-            input, name = Variable(batch[0][:,:,300:341,226:287]), batch[1]
+            input, name = Variable(batch[0]), batch[1]
         if cuda:
             input = input.cuda(gpus_list[0])
-        print(name[0])
-        #t0 = time.time()
+        #print(name[0])
+        t0 = time.time()
         # if opt.chop_forward:
         #     with torch.no_grad():
         #         prediction = chop_forward(input, model, opt.upscale_factor)
@@ -90,17 +90,16 @@ def eval():
         #         with torch.no_grad():
         #if name[0] not in alreadysaved:
         with torch.no_grad():
-            print(input.size())
             prediction = model(input)
                 
         # if opt.residual:
         #     prediction = prediction + bicubic
 
-        #t1 = time.time()
+        t1 = time.time()
 
-        #print("===> Processing: %s || Timer: %.4f sec." % (name[0], (t1 - t0)))
+        print("===> Processed: %s || Timer: %.4f sec." % (name[0], (t1 - t0)))
         #print(name[0])
-            save_img(prediction.cpu().data, name[0])
+        save_img(prediction.cpu().data, name[0])
 
 def save_img(img, img_name):
     save_img = img.squeeze().numpy().transpose(0,1)
@@ -202,5 +201,4 @@ def chop_forward(x, model, scale, shave=8, min_size=80000, nGPUs=opt.gpus):
 
 ##Eval Start!!!!
 
-alreadysaved = os.listdir(os.path.join(opt.output,opt.test_dataset))
 eval()
