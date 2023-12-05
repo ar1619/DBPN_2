@@ -17,7 +17,7 @@ def get_validation_set(data_dir, hr, upscale_factor):
     return DatasetFromFolderValid(hr_dir, upscale_factor,
                              transform=transform())
 
-def get_eval_set(lr_dir, upscale_factor):
+def get_eval_set(lr_dir, out_dir, upscale_factor):
     return DatasetFromFolderEval(lr_dir, upscale_factor,
                              transform=transform())
 

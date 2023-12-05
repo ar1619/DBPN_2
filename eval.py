@@ -29,7 +29,7 @@ parser.add_argument('--threads', type=int, default=1, help='number of threads fo
 parser.add_argument('--seed', type=int, default=123, help='random seed to use. Default=123')
 parser.add_argument('--gpus', default=1, type=int, help='number of gpu')
 parser.add_argument('--input_dir', type=str, default='Input')
-parser.add_argument('--output', default='Results/', help='Location to save checkpoint models')
+parser.add_argument('--output', default='Results', help='Location to save checkpoint models')
 parser.add_argument('--test_dataset', type=str, default='XCO2')
 parser.add_argument('--model_type', type=str, default='DBPNLL')
 parser.add_argument('--residual', type=bool, default=False)
@@ -50,7 +50,7 @@ if cuda:
     torch.cuda.manual_seed(opt.seed)
 
 #print('===> Loading datasets')
-test_set = get_eval_set(os.path.join(opt.input_dir,opt.test_dataset), opt.upscale_factor)
+test_set = get_eval_set(os.path.join(opt.input_dir,opt.test_dataset), os.path.join(opt.output,opt.test_dataset), opt.upscale_factor)
 testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=opt.testBatchSize, shuffle=True)
 
 #print('===> Building model')

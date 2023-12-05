@@ -13,10 +13,21 @@ from random import randrange
 def is_image_file(filename):
     return any(filename.endswith(extension) for extension in [".png", ".jpg", ".jpeg", ".npy"])
 
+def normalize_array(data):
+    vmax = np.amax(data[np.nonzero(data)])
+    vmin = np.amin(data[np.nonzero(data)])
+    range_data = vmax - vmin
+    
+    normalized_data = (data - vmin)/range_data
+    threshold = - 1./range_data
+    data = np.maximum(normalized_data,threshold)
+    data[data == threshold] = -1
+    
+    return data
 
 def load_img(filepath):
-    time.sleep(0.01)
     img = np.load(filepath)
+    img = normalize_array(img)
     img = np.expand_dims(img, axis = 2)
     img = np.float32(img)
     #y, _, _ = img.split()
@@ -122,9 +133,12 @@ class DatasetFromFolder(data.Dataset):
         return len(self.image_filenames)
 
 class DatasetFromFolderEval(data.Dataset):
-    def __init__(self, lr_dir, upscale_factor, transform=None):
+    def __init__(self, lr_dir, out_dir, upscale_factor, transform=None):
         super(DatasetFromFolderEval, self).__init__()
-        self.image_filenames = [join(lr_dir, x) for x in listdir(lr_dir) if is_image_file(x)]
+        list_original = [filename for filename in listdir(lr_dir)]
+        list_done = [filename for filename in listdir(out_dir)]
+        missing_list = list(set(list_original) - set(list_done))
+        self.image_filenames = [join(lr_dir, x) for x in missing_list if is_image_file(x)]
         self.upscale_factor = upscale_factor
         self.transform = transform
 
