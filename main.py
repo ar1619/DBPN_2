@@ -30,7 +30,10 @@ parser.add_argument('--threads', type=int, default=1, help='number of threads fo
 parser.add_argument('--seed', type=int, default=123, help='random seed to use. Default=123')
 parser.add_argument('--gpus', default=1, type=int, help='number of gpu')
 parser.add_argument('--data_dir', type=str, default='')
-parser.add_argument('--data_augmentation', type=bool, default=False)
+parser.add_argument('--quantize', type=bool, default=True)
+parser.add_argument('--decimals', type=int, default=2)
+parser.add_argument('--noise_level', type=float, default=0.01)
+parser.add_argument('--data_augmentation', type=bool, default=True)
 parser.add_argument('--hr_train_dataset', type=str, default='../DIV2K_train_HR')
 parser.add_argument('--hr_valid_dataset', type=str, default='../MOD_tensor_validate')
 parser.add_argument('--model_type', type=str, default='DBPNLL')
@@ -39,7 +42,7 @@ parser.add_argument('--patch_size', type=int, default=32, help='Size of cropped 
 parser.add_argument('--pretrained_sr', default='MIX2K_LR_aug_x4dl10DBPNITERtpami_epoch_399.pth', help='sr pretrained base model')
 parser.add_argument('--pretrained', type=bool, default=False)
 parser.add_argument('--save_folder', default='weights/', help='Location to save checkpoint models')
-parser.add_argument('--prefix', default='1channel_16_MOD', help='Location to save checkpoint models')
+parser.add_argument('--prefix', default='1channel', help='Location to save checkpoint models')
 #parser.add_argument('--weight_decay', type=float, default=0.0001, help='Weight decay')
 
 opt = parser.parse_args()
@@ -113,7 +116,7 @@ def print_network(net):
     print('Total number of parameters: %d' % num_params)
 
 def checkpoint(epoch):
-    model_out_path = opt.save_folder+opt.hr_train_dataset+hostname+opt.model_type+opt.prefix+".pth"
+    model_out_path = opt.save_folder+opt.hr_train_dataset.replace('../','')+hostname+opt.prefix+".pth"
     torch.save(model.state_dict(), model_out_path)
     print("Checkpoint saved to {}".format(model_out_path))
 
@@ -126,7 +129,7 @@ if cuda:
     torch.cuda.manual_seed(opt.seed)
 
 print('===> Loading datasets')
-train_set = get_training_set(opt.data_dir, opt.hr_train_dataset, opt.upscale_factor, opt.patch_size, opt.data_augmentation)
+train_set = get_training_set(opt.data_dir, opt.hr_train_dataset, opt.upscale_factor, opt.noise_level, opt.patch_size, opt.data_augmentation, opt.decimals, opt.quantize)
 training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=True)
 
 #valid_set = get_validation_set(opt.data_dir, opt.hr_valid_dataset, opt.upscale_factor)
@@ -175,7 +178,7 @@ for epoch in range(opt.start_iter, opt.nEpochs + 1):
             param_group['lr'] /= 10.0
         print('Learning rate decay: lr={}'.format(optimizer.param_groups[0]['lr']))
 
-    if epoch % 5 == 0:
+    if epoch % 10 == 0:
         checkpoint(epoch)    
     if i == opt.patience:
         print('Loss stopped improving at epoch N: {}'.format(epoch))

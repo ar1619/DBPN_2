@@ -51,7 +51,7 @@ if cuda:
 
 #print('===> Loading datasets')
 test_set = get_eval_set(os.path.join(opt.input_dir,opt.test_dataset), os.path.join(opt.output,opt.test_dataset), opt.upscale_factor)
-testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=opt.testBatchSize, shuffle=True)
+testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=opt.testBatchSize, shuffle=False)
 
 #print('===> Building model')
 if opt.model_type == 'DBPNLL':

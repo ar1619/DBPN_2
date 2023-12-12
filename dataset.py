@@ -25,6 +25,17 @@ def normalize_array(data):
     
     return data
 
+def quantize_array(data, decimals):
+    data = np.round(data, decimals)
+    data = np.float32(data)
+    return data
+
+def noise_array(data, noise_level):
+    noise = np.random.normal(0, noise_level, data.shape)
+    data = data + noise
+    data = np.float32(data)
+    return data
+
 def load_img(filepath):
     img = np.load(filepath)
     img = normalize_array(img)
@@ -66,30 +77,35 @@ def augment(img_in, img_tar, flip_h=True, rot=True):
     info_aug = {'flip_h': False, 'flip_v': False, 'trans': False}
     
     if random.random() < 0.5 and flip_h:
-        img_in = ImageOps.flip(img_in)
-        img_tar = ImageOps.flip(img_tar)
+        img_in = np.flipud(img_in)
+        img_tar = np.flipud(img_tar)
         info_aug['flip_h'] = True
 
     if rot:
         if random.random() < 0.5:
-            img_in = ImageOps.mirror(img_in)
-            img_tar = ImageOps.mirror(img_tar)
+            img_in = np.rot90(img_in)
+            img_tar = np.rot90(img_tar)
             info_aug['flip_v'] = True
         if random.random() < 0.5:
-            img_in = img_in.rotate(180)
-            img_tar = img_tar.rotate(180)
+            img_in = np.rot90(img_in, k=2)
+            img_tar = np.rot90(img_tar, k=2)
             info_aug['trans'] = True
             
-    return img_in, img_tar, img_bic, info_aug
-    
+    img_in = np.float32(img_in)
+    img_tar = np.float32(img_tar)
+    return img_in, img_tar, info_aug
+
 class DatasetFromFolder(data.Dataset):
-    def __init__(self, image_dir, patch_size, upscale_factor, data_augmentation, transform=None):
+    def __init__(self, image_dir, patch_size, upscale_factor, noise_level, data_augmentation, decimals=0, quantize=False, transform=None):
         super(DatasetFromFolder, self).__init__()
         self.image_filenames = [join(image_dir, x) for x in listdir(image_dir) if is_image_file(x)]
         self.patch_size = patch_size
         self.upscale_factor = upscale_factor
         self.transform = transform
         self.data_augmentation = data_augmentation
+        self.noise_level = noise_level
+        self.decimals = decimals
+        self.quantize = quantize
         if self.upscale_factor == 2:
             self.random_factor = np.random.choice([1, 2, 4, 8], len(self.image_filenames), p=[0.25, 0.25, 0.25, 0.25])
         elif self.upscale_factor == 4:
@@ -117,8 +133,13 @@ class DatasetFromFolder(data.Dataset):
 
         else:
             input = pyramid_reduce(target, downscale=self.upscale_factor, sigma=None, order=3, mode='constant', cval=0, channel_axis=2)
+            input = noise_array(input, self.noise_level)
         
         input, target, _ = get_patch(input,target,self.patch_size, self.upscale_factor)
+
+        if self.quantize:
+            input = quantize_array(input, self.decimals)
+            target = quantize_array(target, self.decimals)
         
         if self.data_augmentation:
             input, target, _ = augment(input, target)
@@ -142,6 +163,7 @@ class DatasetFromFolderEval(data.Dataset):
         self.upscale_factor = upscale_factor
         self.transform = transform
 
+        self.image_filenames.sort()
     def __getitem__(self, index):
         input = load_img(self.image_filenames[index])
         _, file = os.path.split(self.image_filenames[index])

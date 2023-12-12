@@ -7,9 +7,9 @@ def transform():
         ToTensor(),
     ])
 
-def get_training_set(data_dir, hr, upscale_factor, patch_size, data_augmentation):
+def get_training_set(data_dir, hr, upscale_factor, noise_level, patch_size, data_augmentation, decimals, quantize):
     hr_dir = join(data_dir, hr)
-    return DatasetFromFolder(hr_dir,patch_size, upscale_factor, data_augmentation,
+    return DatasetFromFolder(hr_dir,patch_size, upscale_factor, noise_level, data_augmentation, decimals, quantize,
                              transform=transform())
 
 def get_validation_set(data_dir, hr, upscale_factor):
@@ -18,6 +18,6 @@ def get_validation_set(data_dir, hr, upscale_factor):
                              transform=transform())
 
 def get_eval_set(lr_dir, out_dir, upscale_factor):
-    return DatasetFromFolderEval(lr_dir, upscale_factor,
+    return DatasetFromFolderEval(lr_dir, out_dir, upscale_factor,
                              transform=transform())
 
