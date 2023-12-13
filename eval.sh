@@ -16,4 +16,4 @@
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate gpu_current2
 
-srun python eval.py --upscale_factor 16 --input_dir ../../RDS/OCO-2 --output ../../RDS/OCO-2/SR_retrained_50 --test_dataset centered_arrays --model weights/MOD_tensorese-hivemind1channel_50.pth
+srun python eval.py --upscale_factor 16 --input_dir ../../RDS/difference_xco2_test/lr --output ../../RDS/difference_xco2_test/sr --test_dataset diff --model weights/MOD_tensorese-hivemind1channel_50.pth

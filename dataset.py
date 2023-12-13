@@ -14,8 +14,8 @@ def is_image_file(filename):
     return any(filename.endswith(extension) for extension in [".png", ".jpg", ".jpeg", ".npy"])
 
 def normalize_array(data):
-    vmax = np.amax(data[np.nonzero(data)])
-    vmin = np.amin(data[np.nonzero(data)])
+    vmax = np.amax(data)
+    vmin = np.amin(data)
     range_data = vmax - vmin
     
     normalized_data = (data - vmin)/range_data
