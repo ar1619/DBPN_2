@@ -25,6 +25,7 @@ parser.add_argument('--testBatchSize', type=int, default=1, help='testing batch 
 parser.add_argument('--gpu_mode', type=bool, default=True)
 parser.add_argument('--self_ensemble', type=bool, default=False)
 parser.add_argument('--chop_forward', type=bool, default=False)
+parser.add_argument('--quantize', type=bool, default=True)
 parser.add_argument('--threads', type=int, default=1, help='number of threads for data loader to use')
 parser.add_argument('--seed', type=int, default=123, help='random seed to use. Default=123')
 parser.add_argument('--gpus', default=1, type=int, help='number of gpu')
@@ -50,7 +51,7 @@ if cuda:
     torch.cuda.manual_seed(opt.seed)
 
 #print('===> Loading datasets')
-test_set = get_eval_set(os.path.join(opt.input_dir,opt.test_dataset), os.path.join(opt.output,opt.test_dataset), opt.upscale_factor)
+test_set = get_eval_set(os.path.join(opt.input_dir,opt.test_dataset), os.path.join(opt.output,opt.test_dataset), opt.upscale_factor, opt.quantize)
 testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=opt.testBatchSize, shuffle=False)
 
 #print('===> Building model')

@@ -5,16 +5,19 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.distributed as dist
+from torch.utils.data.distributed import DistributedSampler
+from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.backends.cudnn as cudnn
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
-from dbpn_v1 import Net as DBPNLL
+import torch.multiprocessing as mp
+from model import Net as DBPNLL
 from data import get_training_set
 
 import ray
 from ray import train, tune
-from ray.train import Checkpoint
-from ray.tune.schedulers import ASHAScheduler
+from ray.tune.search.hyperopt import HyperOptSearch
 
 import pdb
 import socket
@@ -22,14 +25,10 @@ import time
 
 # Training settings
 parser = argparse.ArgumentParser(description='PyTorch Super Res Example')
-parser.add_argument('--upscale_factor', type=int, default=8, help="super resolution upscale factor")
-parser.add_argument('--batchSize', type=int, default=16, help='training batch size')
 parser.add_argument('--nEpochs', type=int, default=2000, help='number of epochs to train for')
-parser.add_argument('--snapshots', type=int, default=500, help='Snapshots')
 parser.add_argument('--start_iter', type=int, default=1, help='Starting Epoch')
-parser.add_argument('--lr', type=float, default=1e-4, help='Learning Rate. Default=0.01')
 parser.add_argument('--gpu_mode', type=bool, default=True)
-parser.add_argument('--patience', type=int, default=100, help='patience value for early stopping')
+parser.add_argument('--patience', type=int, default=10, help='patience value for early stopping')
 parser.add_argument('--threads', type=int, default=1, help='number of threads for data loader to use')
 parser.add_argument('--seed', type=int, default=123, help='random seed to use. Default=123')
 parser.add_argument('--gpus', default=1, type=int, help='number of gpu')
@@ -38,57 +37,30 @@ parser.add_argument('--data_augmentation', type=bool, default=True)
 parser.add_argument('--hr_train_dataset', type=str, default='../../RDS/DIV2K/DIV2K_train_HR_16')
 parser.add_argument('--model_type', type=str, default='DBPNLL')
 parser.add_argument('--residual', type=bool, default=False)
-parser.add_argument('--patch_size', type=int, default=40, help='Size of cropped HR image')
+parser.add_argument('--patch_size', type=int, default=32, help='Size of cropped HR image')
 parser.add_argument('--pretrained_sr', default='MIX2K_LR_aug_x4dl10DBPNITERtpami_epoch_399.pth', help='sr pretrained base model')
 parser.add_argument('--pretrained', type=bool, default=True)
 parser.add_argument('--save_folder', default='weights/', help='Location to save checkpoint models')
 parser.add_argument('--prefix', default='replicate_16_MOD', help='Location to save checkpoint models')
 
 opt = parser.parse_args()
-gpus_list = range(opt.gpus)
 hostname = str(socket.gethostname())
 cudnn.benchmark = True
 print(opt)
 
-def train(epoch):
-    epoch_loss = 0
-    model.train()
-    for iteration, batch in enumerate(training_data_loader, 1):
-        input, target = Variable(batch[0]), Variable(batch[1])
-        if cuda:
-            input = input.cuda(gpus_list[0])
-            target = target.cuda(gpus_list[0])
+def setup(rank, world_size):
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
 
-        optimizer.zero_grad()
-        t0 = time.time()
-        prediction = model(input)
+def prepare_data(rank, world_size, num_workers=0):
+    train_set = get_training_set(opt.data_dir, opt.hr_train_dataset, opt.upscale_factor, opt.noise_level, opt.patch_size, opt.data_augmentation, opt.decimals, opt.quantize)
+    sampler = DistributedSampler(train_set, num_replicas=world_size, rank=rank, shuffle=False, drop_last=False)
+    training_data_loader = DataLoader(dataset=train_set, num_workers=num_workers, batch_size=opt.batchSize, shuffle=False, sampler=sampler)
+    return training_data_loader
 
-        # if opt.residual:
-        #     prediction = prediction + bicubic
-        # print(prediction.shape, target.shape)
-        loss = criterion(prediction, target)
-        t1 = time.time()
-        epoch_loss += loss.data
-        loss.backward()
-        optimizer.step()
-        
-        print("===> Epoch[{}]({}/{}): Loss: {:.4f} || Timer: {:.4f} sec.".format(epoch, iteration, len(training_data_loader), loss.data, (t1 - t0)))
-
-    print("===> Epoch {} Training: Avg. Loss: {:.4f}".format(epoch, epoch_loss / len(training_data_loader)))
-
-def test():
-    avg_psnr = 0
-    for batch in testing_data_loader:
-        input, target = Variable(batch[0]), Variable(batch[1])
-        if cuda:
-            input = input.cuda(gpus_list[0])
-            target = target.cuda(gpus_list[0])
-
-        prediction = model(input)
-        mse = criterion(prediction, target)
-        psnr = 10 * log10(1 / mse.data[0])
-        avg_psnr += psnr
-    print("===> Avg. PSNR: {:.4f} dB".format(avg_psnr / len(testing_data_loader)))
+def cleanup():
+    dist.destroy_process_group()
 
 def print_network(net):
     num_params = 0
@@ -97,10 +69,28 @@ def print_network(net):
     print(net)
     print('Total number of parameters: %d' % num_params)
 
-def checkpoint(epoch):
-    model_out_path = opt.save_folder+hostname+opt.model_type+opt.prefix+'_'+str(epoch)+'_'+".pth"
-    torch.save(model.state_dict(), model_out_path)
-    print("Checkpoint saved to {}".format(model_out_path))
+def checkpoint(epoch, model, optimizer):
+    if torch.distributed.get_rank() == 0:
+        checkpoint = {
+            'epoch': epoch,
+            'model': model.module.state_dict(),
+            'optimizer': optimizer.state_dict()
+        }
+        model_out_path = opt.save_folder + opt.model_type + "ITER" + str(epoch) + ".pth"
+        torch.save(checkpoint, model_out_path)
+        print("Checkpoint saved to {}".format(model_out_path))
+
+def load_checkpoint(model, optimizer, rank):
+    loc = 'cuda:{}'.format(torch.distributed.get_rank())
+    checkpoint = torch.load(opt.pretrained_sr, map_location=loc)
+
+    model.load_state_dict(checkpoint['model'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    epoch = checkpoint['epoch']
+
+    model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=True)
+
+    return model, optimizer, epoch
 
 cuda = opt.gpu_mode
 if cuda and not torch.cuda.is_available():
@@ -110,134 +100,78 @@ torch.manual_seed(opt.seed)
 if cuda:
     torch.cuda.manual_seed(opt.seed)
 
-print('===> Loading datasets')
-train_set = get_training_set(opt.data_dir, opt.hr_train_dataset, opt.upscale_factor, opt.patch_size, opt.data_augmentation)
-training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=True)
-
-print('===> Building model ', opt.model_type)
-if opt.model_type == 'DBPNLL':
-    model = DBPNLL(num_channels=3, base_filter=64,  feat = 256, num_stages=10, scale_factor=opt.upscale_factor) 
-elif opt.model_type == 'DBPN-RES-MR64-3':
-    model = DBPNITER(num_channels=3, base_filter=64,  feat = 256, num_stages=3, scale_factor=opt.upscale_factor)
-else:
-    model = DBPN(num_channels=3, base_filter=64,  feat = 256, num_stages=7, scale_factor=opt.upscale_factor) 
+def train_ddp(config, num_epochs=10):
+    # Set up the DDP environment.
     
-model = torch.nn.DataParallel(model, device_ids=gpus_list)
-criterion = nn.L1Loss()
+    train_set = get_training_set(opt.data_dir, opt.hr_train_dataset, 16, config['noise_level'], opt.patch_size, opt.data_augmentation, config['decimals'], config['quantize'])
+    training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=config['batch_size'], shuffle=True)
 
-print('---------- Networks architecture -------------')
-print_network(model)
-print('----------------------------------------------')
-
-if opt.pretrained:
-    model_name = os.path.join(opt.save_folder + opt.pretrained_sr)
-    if os.path.exists(model_name):
-        #model= torch.load(model_name, map_location=lambda storage, loc: storage)
-        model.load_state_dict(torch.load(model_name, map_location=lambda storage, loc: storage))
-        print('Pre-trained SR model is loaded.')
-
-if cuda:
-    model = model.cuda(gpus_list[0])
-    criterion = criterion.cuda(gpus_list[0])
-
-optimizer = optim.Adam(model.parameters(), lr=opt.lr, betas=(0.9, 0.999), eps=1e-8)
-
-for epoch in range(opt.start_iter, opt.nEpochs + 1):
-    train(epoch)
-
-    # learning rate is decayed by a factor of 10 every half of total epochs
-    if (epoch+1) % (opt.nEpochs/2) == 0:
-        for param_group in optimizer.param_groups:
-            param_group['lr'] /= 10.0
-        print('Learning rate decay: lr={}'.format(optimizer.param_groups[0]['lr']))
-
-    if (epoch+1) % (opt.snapshots) == 0:
-        checkpoint(epoch)
-
-def train_tune(config):
-
-    optimizer = optim.Adam(model.parameters(), lr=opt.lr, betas=(0.9, 0.999), eps=1e-8)
+    model = DBPNLL(num_channels=1, base_filter=64,  feat = 256, num_stages=10, scale_factor=16).cuda()
+    optimizer = optim.Adam(model.parameters(), lr=config["lr"], betas=(0.9, 0.999), eps=1e-8)
+    criterion = nn.L1Loss().cuda()
     
-    epoch_loss = 0
-    model.train()
-    for _, batch in enumerate(training_data_loader, 1):
-        input, target = Variable(batch[0]), Variable(batch[1])
-        if cuda:
-            input = input.cuda(gpus_list[0])
-            target = target.cuda(gpus_list[0])
+    # Define your training loop.
+    for epoch in range(num_epochs):
+        epoch_loss = 0
+        for iteration, batch in enumerate(training_data_loader, 1):
+            model.train()
+            input, target = Variable(batch[0]), Variable(batch[1])
+            if cuda:
+                input = input.cuda()
+                target = target.cuda()
 
-        optimizer.zero_grad()
-        prediction = model(input)
+            optimizer.zero_grad()
+            prediction = model(input)
 
-        loss = criterion(prediction, target)
-        epoch_loss += loss.data
-        loss.backward()
-        optimizer.step()
+            if cuda:
+                target = target.to(prediction.device)
+            loss = criterion(prediction, target)
+            epoch_loss += loss.data
+            loss.backward()
+            optimizer.step()
 
-    return epoch_loss / len(training_data_loader)
+            epoch_total_loss = epoch_loss / len(training_data_loader)
+        tune.report(loss=epoch_total_loss)
+    
+    # Clean up DDP.
+    dist.destroy_process_group()
 
-def test_best_model(best_result):
-    best_trained_model = Net(best_result.config["l1"], best_result.config["l2"])
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    best_trained_model.to(device)
-
-    checkpoint_path = os.path.join(best_result.checkpoint.to_directory(), "checkpoint.pt")
-
-    model_state, optimizer_state = torch.load(checkpoint_path)
-    best_trained_model.load_state_dict(model_state)
-
-    trainset, testset = load_data()
-
-    testloader = torch.utils.data.DataLoader(
-        testset, batch_size=4, shuffle=False, num_workers=2)
-
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for data in testloader:
-            images, labels = data
-            images, labels = images.to(device), labels.to(device)
-            outputs = best_trained_model(images)
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-
-
-    print("Best trial test set accuracy: {}".format(correct / total))
-
-def main(num_samples=10, max_num_epochs=10, gpus_per_trial=2):
+def tune_ddp(num_samples=10, num_epochs=10, gpus_per_trial=1):
+    # Define the hyperparameter search space.
     config = {
-        "l1": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
-        "l2": tune.sample_from(lambda _: 2 ** np.random.randint(2, 9)),
         "lr": tune.loguniform(1e-4, 1e-1),
-        "batch_size": tune.choice([2, 4, 8, 16])
+        "batch_size": tune.choice([2, 4]),
+        "noise_level": tune.choice([0.05, 0.01, 0.005, 0.001]),
+        "decimals": tune.choice([2, 3, 4, 5]),
+        "quantize": tune.choice([True, False])
+        # Add other hyperparameters here
     }
-    scheduler = ASHAScheduler(
-        max_t=max_num_epochs,
+    
+    # Define the scheduler and search algorithm.
+    scheduler = ray.tune.schedulers.ASHAScheduler(
+        max_t=num_epochs,
         grace_period=1,
         reduction_factor=2)
+    search_alg = HyperOptSearch(metric="loss", mode="min")
     
-    tuner = tune.Tuner(
-        tune.with_resources(
-            tune.with_parameters(train_cifar),
-            resources={"cpu": 2, "gpu": gpus_per_trial}
-        ),
+    # Launch the Ray Tune run.
+    analysis = tune.Tuner(
+        tune.with_resources(tune.with_parameters(train_ddp), resources={"cpu": 16, "gpu": gpus_per_trial}),
         tune_config=tune.TuneConfig(
             metric="loss",
             mode="min",
             scheduler=scheduler,
             num_samples=num_samples,
+            search_alg=search_alg
         ),
-        param_space=config,
-    )
-    results = tuner.fit()
+        param_space=config)
     
-    best_result = results.get_best_result("loss", "min")
-
-    print("Best trial config: {}".format(best_result.config))
-    print("Best trial final validation loss: {}".format(
-        best_result.metrics["loss"]))
-    print("Best trial final validation accuracy: {}".format(
-        best_result.metrics["accuracy"]))
-
-    test_best_model(best_result)
+    results = analysis.fit()
+    best_hyperparameters = results.get_best_result().config
+    print("Best hyperparameters found were: ", best_hyperparameters)
+# Example usage:
+# This should be executed in a script that is run with `ray submit` or similar.
+num_samples = 10
+num_epochs = 10
+gpus_per_trial = 1
+tune_ddp(num_samples, num_epochs, gpus_per_trial)

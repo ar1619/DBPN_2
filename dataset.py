@@ -145,8 +145,8 @@ class DatasetFromFolder(data.Dataset):
             input, target, _ = augment(input, target)
         
         if self.transform:
-            input = self.transform(input)
-            target = self.transform(target)
+            input = self.transform(input.copy())
+            target = self.transform(target.copy())
                 
         return input, target
 
@@ -154,7 +154,7 @@ class DatasetFromFolder(data.Dataset):
         return len(self.image_filenames)
 
 class DatasetFromFolderEval(data.Dataset):
-    def __init__(self, lr_dir, out_dir, upscale_factor, transform=None):
+    def __init__(self, lr_dir, out_dir, upscale_factor, quantize=False, transform=None):
         super(DatasetFromFolderEval, self).__init__()
         list_original = [filename for filename in listdir(lr_dir)]
         list_done = [filename for filename in listdir(out_dir)]
@@ -162,15 +162,20 @@ class DatasetFromFolderEval(data.Dataset):
         self.image_filenames = [join(lr_dir, x) for x in missing_list if is_image_file(x)]
         self.upscale_factor = upscale_factor
         self.transform = transform
+        self.quantize = quantize
 
         self.image_filenames.sort()
     def __getitem__(self, index):
         input = load_img(self.image_filenames[index])
         _, file = os.path.split(self.image_filenames[index])
         
+        if self.quantize:
+            input = quantize_array(input, 2)
+
         if self.transform:
             input = self.transform(input)
             
+        print(input.shape)
         return input, file
       
     def __len__(self):
