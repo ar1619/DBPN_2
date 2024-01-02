@@ -15,4 +15,4 @@
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate gpu_current2
 
-srun python -u hyperparameter_tuning.py --start_iter 1 --patch_size 32 --gpus 2 --hr_train_dataset /home/ar1619/DBPN_2/MOD_tensor --hr_valid_dataset /home/ar1619/DBPN_2/MOD_tensor_val
+srun python -u hyperparameter_tuning.py --start_iter 1 --patch_size 32 --gpus 2 --hr_train_dataset /home/ar1619/DBPN_2/MOD_tensor --hr_valid_dataset /home/ar1619/DBPN_2/MOD_tensor_validate
