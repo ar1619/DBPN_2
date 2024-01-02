@@ -13,7 +13,7 @@ from torch.autograd import Variable
 from torch.utils.data import DataLoader
 import torch.multiprocessing as mp
 from model import Net as DBPNLL
-from data import get_training_set
+from data import get_training_set, get_validation_set
 
 import ray
 from ray import train, tune
@@ -35,6 +35,7 @@ parser.add_argument('--gpus', default=1, type=int, help='number of gpu')
 parser.add_argument('--data_dir', type=str, default='')
 parser.add_argument('--data_augmentation', type=bool, default=True)
 parser.add_argument('--hr_train_dataset', type=str, default='../../RDS/DIV2K/DIV2K_train_HR_16')
+parser.add_argument('--hr_valid_dataset', type=str, default='../../RDS/DIV2K/DIV2K_valid_HR_16')
 parser.add_argument('--model_type', type=str, default='DBPNLL')
 parser.add_argument('--residual', type=bool, default=False)
 parser.add_argument('--patch_size', type=int, default=32, help='Size of cropped HR image')
@@ -47,6 +48,7 @@ opt = parser.parse_args()
 hostname = str(socket.gethostname())
 cudnn.benchmark = True
 print(opt)
+print(os.getcwd())
 
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
@@ -101,17 +103,20 @@ if cuda:
     torch.cuda.manual_seed(opt.seed)
 
 def train_ddp(config, num_epochs=10):
-    # Set up the DDP environment.
-    
-    train_set = get_training_set(opt.data_dir, opt.hr_train_dataset, 16, config['noise_level'], opt.patch_size, opt.data_augmentation, config['decimals'], config['quantize'])
-    training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=config['batch_size'], shuffle=True)
 
-    model = DBPNLL(num_channels=1, base_filter=64,  feat = 256, num_stages=10, scale_factor=16).cuda()
+    train_set = get_training_set(opt.data_dir, opt.hr_train_dataset, 16, config['noise_level'], opt.patch_size, opt.data_augmentation, config['decimals'], quantize=True)
+    training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=4, shuffle=True)
+
+    validation_set = get_validation_set(opt.data_dir, opt.hr_valid_dataset, 16, config['decimals'], quantize=True)
+    validation_data_loader = DataLoader(dataset=validation_set, num_workers=opt.threads, batch_size=1, shuffle=False)
+
+    model = DBPNLL(num_channels=1, base_filter=64,  feat = 256, num_stages=10, scale_factor=16, combination=config['combination'], tuning=True).cuda()
     optimizer = optim.Adam(model.parameters(), lr=config["lr"], betas=(0.9, 0.999), eps=1e-8)
     criterion = nn.L1Loss().cuda()
     
-    # Define your training loop.
+    # Training loop.
     for epoch in range(num_epochs):
+        t0 = time.time()
         epoch_loss = 0
         for iteration, batch in enumerate(training_data_loader, 1):
             model.train()
@@ -126,39 +131,56 @@ def train_ddp(config, num_epochs=10):
             if cuda:
                 target = target.to(prediction.device)
             loss = criterion(prediction, target)
-            epoch_loss += loss.data
+            epoch_loss += loss.item()
             loss.backward()
             optimizer.step()
+            # print("===> Epoch[{}]({}/{}): Loss: {:.4f} || Timer: {:.4f} sec.".format(epoch, iteration, len(training_data_loader), loss.item(), (t_iter - t_inter)))
 
-            epoch_total_loss = epoch_loss / len(training_data_loader)
-        tune.report(loss=epoch_total_loss)
-    
-    # Clean up DDP.
-    dist.destroy_process_group()
+        t_iter = time.time()
+        epoch_total_loss = epoch_loss / len(training_data_loader)
+        # print("===> Epoch {} Complete: Training Loss: {:.4f} || Timer: {:.4f} sec.".format(epoch, epoch_total_loss, (t_iter - t0)))
+        # train.report({"train_loss": epoch_total_loss})
 
-def tune_ddp(num_samples=10, num_epochs=10, gpus_per_trial=1):
-    # Define the hyperparameter search space.
+    # Validation loop.
+        epoch_val_loss = 0
+        model.eval()
+        with torch.no_grad():
+            for iteration, batch in enumerate(validation_data_loader, 1):
+                input, target= Variable(batch[0]), Variable(batch[1])
+                if cuda:
+                    input = input.cuda()
+                    target = target.cuda()
+                prediction = model(input)
+                loss_val = criterion(prediction, target)
+                
+                epoch_val_loss += loss_val.item()
+            val_loss = epoch_val_loss / len(validation_data_loader)
+                    
+            train.report({"val_loss": val_loss})
+        t1 = time.time()
+        print("Epoch {} complete. Train Loss: {:.4f}. Val Loss: {:.4f} || Total time:{:.4f}".format(epoch, epoch_total_loss, val_loss, t1-t0))
+
+def tune_ddp(num_samples, num_epochs, gpus_per_trial=1):
+    # Hyperparameters search space.
     config = {
-        "lr": tune.loguniform(1e-4, 1e-1),
-        "batch_size": tune.choice([2, 4]),
-        "noise_level": tune.choice([0.05, 0.01, 0.005, 0.001]),
+        "lr": tune.loguniform(1e-5, 5e-4),
+        "noise_level": tune.choice([0.05, 0.01, 0.005]),
         "decimals": tune.choice([2, 3, 4, 5]),
-        "quantize": tune.choice([True, False])
-        # Add other hyperparameters here
+        "combination": tune.choice([1, 2])
     }
     
-    # Define the scheduler and search algorithm.
+    # Scheduler to stop bad trials.
     scheduler = ray.tune.schedulers.ASHAScheduler(
         max_t=num_epochs,
-        grace_period=1,
+        grace_period=3,
         reduction_factor=2)
-    search_alg = HyperOptSearch(metric="loss", mode="min")
+    search_alg = HyperOptSearch(metric="val_loss", mode="min")
     
-    # Launch the Ray Tune run.
+    # Tuner.
     analysis = tune.Tuner(
         tune.with_resources(tune.with_parameters(train_ddp), resources={"cpu": 16, "gpu": gpus_per_trial}),
         tune_config=tune.TuneConfig(
-            metric="loss",
+            metric="val_loss",
             mode="min",
             scheduler=scheduler,
             num_samples=num_samples,
@@ -167,11 +189,11 @@ def tune_ddp(num_samples=10, num_epochs=10, gpus_per_trial=1):
         param_space=config)
     
     results = analysis.fit()
-    best_hyperparameters = results.get_best_result().config
-    print("Best hyperparameters found were: ", best_hyperparameters)
-# Example usage:
-# This should be executed in a script that is run with `ray submit` or similar.
+    best_results = results.get_best_result("val_loss", "min")
+    print("Best result: ", best_results)
+    print("Best hyperparameters found were: ", best_results.config)
+
 num_samples = 10
-num_epochs = 10
+num_epochs = 20
 gpus_per_trial = 1
 tune_ddp(num_samples, num_epochs, gpus_per_trial)

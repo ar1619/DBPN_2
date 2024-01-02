@@ -12,9 +12,9 @@ def get_training_set(data_dir, hr, upscale_factor, noise_level, patch_size, data
     return DatasetFromFolder(hr_dir,patch_size, upscale_factor, noise_level, data_augmentation, decimals, quantize,
                              transform=transform())
 
-def get_validation_set(data_dir, hr, upscale_factor):
+def get_validation_set(data_dir, hr, upscale_factor, decimals, quantize):
     hr_dir = join(data_dir, hr)
-    return DatasetFromFolderValid(hr_dir, upscale_factor,
+    return DatasetFromFolderValid(hr_dir, upscale_factor, decimals, quantize,
                              transform=transform())
 
 def get_eval_set(lr_dir, out_dir, upscale_factor, quantize):
