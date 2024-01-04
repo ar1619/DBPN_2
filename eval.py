@@ -26,6 +26,7 @@ parser.add_argument('--gpu_mode', type=bool, default=True)
 parser.add_argument('--self_ensemble', type=bool, default=False)
 parser.add_argument('--chop_forward', type=bool, default=False)
 parser.add_argument('--quantize', type=bool, default=True)
+parser.add_argument('--combination', type=int, default=2)
 parser.add_argument('--threads', type=int, default=1, help='number of threads for data loader to use')
 parser.add_argument('--seed', type=int, default=123, help='random seed to use. Default=123')
 parser.add_argument('--gpus', default=1, type=int, help='number of gpu')
@@ -41,6 +42,12 @@ opt = parser.parse_args()
 gpus_list=range(opt.gpus)
 #print(opt)
 
+def load_checkpoint(model):
+    checkpoint = torch.load(opt.model, map_location=lambda storage, loc: storage)
+
+    model.load_state_dict(checkpoint['model'])
+
+    return model
 
 cuda = opt.gpu_mode
 if cuda and not torch.cuda.is_available():
@@ -56,16 +63,16 @@ testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batc
 
 #print('===> Building model')
 if opt.model_type == 'DBPNLL':
-    model = DBPN(num_channels=1, base_filter=64,  feat = 256, num_stages=10, scale_factor=opt.upscale_factor) ###D-DBPN
+    model = DBPN(num_channels=1, base_filter=64,  feat = 256, num_stages=10, scale_factor=opt.upscale_factor, combination=opt.combination, tuning=True) ###D-DBPN
 elif opt.model_type == 'DBPN-RES-MR64-3':
     model = DBPNITER(num_channels=3, base_filter=64,  feat = 256, num_stages=3, scale_factor=opt.upscale_factor) ###D-DBPN
 else:
-    model = DBPN(num_channels=3, base_filter=64,  feat = 256, num_stages=7, scale_factor=opt.upscale_factor) ###D-DBPN
+    model = DBPN(num_channels=3, base_filter=64,  feat = 256, num_stages=7, scale_factor=opt.upscale_factor, combination=opt.combination, tuning=True) ###D-DBPN
     
-if cuda:
-    model = torch.nn.DataParallel(model, device_ids=gpus_list)
+# if cuda:
+#     model = torch.nn.DataParallel(model, device_ids=gpus_list)
 
-model.load_state_dict(torch.load(opt.model, map_location=lambda storage, loc: storage))
+model= load_checkpoint(model)
 #print('Pre-trained SR model is loaded.')
 
 if cuda:

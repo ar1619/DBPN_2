@@ -31,12 +31,13 @@ parser.add_argument('--snapshots', type=int, default=50, help='Snapshots')
 parser.add_argument('--start_iter', type=int, default=1, help='Starting Epoch')
 parser.add_argument('--lr', type=float, default=1e-4, help='Learning Rate. Default=0.01')
 parser.add_argument('--gpu_mode', type=bool, default=True)
-parser.add_argument('--patience', type=int, default=30, help='patience value for early stopping')
+parser.add_argument('--patience', type=int, default=15, help='patience value for early stopping')
 parser.add_argument('--seed', type=int, default=123, help='random seed to use. Default=123')
 parser.add_argument('--gpus', default=1, type=int, help='number of gpu')
 parser.add_argument('--data_dir', type=str, default='')
 parser.add_argument('--quantize', type=bool, default=True)
 parser.add_argument('--decimals', type=int, default=2)
+parser.add_argument('--combination', type=int, default=1, help='combination of kernel, stride and padding')
 parser.add_argument('--noise_level', type=float, default=0.01)
 parser.add_argument('--data_augmentation', type=bool, default=True)
 parser.add_argument('--hr_train_dataset', type=str, default='../DIV2K_train_HR')
@@ -59,14 +60,18 @@ print(gpus_list)
 
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
+    os.environ['MASTER_PORT'] = '12354'
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
 
 def prepare_data(rank, world_size, num_workers=0):
     train_set = get_training_set(opt.data_dir, opt.hr_train_dataset, opt.upscale_factor, opt.noise_level, opt.patch_size, opt.data_augmentation, opt.decimals, opt.quantize)
     sampler = DistributedSampler(train_set, num_replicas=world_size, rank=rank, shuffle=False, drop_last=False)
     training_data_loader = DataLoader(dataset=train_set, num_workers=num_workers, batch_size=opt.batchSize, shuffle=False, sampler=sampler)
-    return training_data_loader
+
+    validation_set = get_validation_set(opt.data_dir, opt.hr_valid_dataset, 16, opt.decimals, quantize=True)
+    val_sampler = DistributedSampler(validation_set, num_replicas=world_size, rank=rank, shuffle=False, drop_last=False)
+    validation_data_loader = DataLoader(dataset=validation_set, num_workers=num_workers, batch_size=opt.validBatchSize, shuffle=False, sampler=val_sampler)
+    return training_data_loader, validation_data_loader
 
 def cleanup():
     dist.destroy_process_group()
@@ -74,6 +79,7 @@ def cleanup():
 def train(epoch, training_data_loader, criterion, optimizer, model):
     epoch_loss = 0
     training_data_loader.sampler.set_epoch(epoch)
+    
     for iteration, batch in enumerate(training_data_loader, 1):
         model.train()
         input, target = Variable(batch[0]), Variable(batch[1])
@@ -129,7 +135,7 @@ def checkpoint(epoch, model, optimizer):
             'model': model.module.state_dict(),
             'optimizer': optimizer.state_dict()
         }
-        model_out_path = opt.save_folder + opt.model_type + "ITER" + str(epoch) + ".pth"
+        model_out_path = opt.save_folder + opt.model_type + "_post_tuning" + ".pth"
         torch.save(checkpoint, model_out_path)
         print("Checkpoint saved to {}".format(model_out_path))
 
@@ -159,7 +165,7 @@ def main(rank, world_size):
     
     if rank == 0:
         print('===> Loading datasets')
-    training_data_loader = prepare_data(rank=rank, world_size=world_size, num_workers=0)
+    training_data_loader, validation_data_loader = prepare_data(rank=rank, world_size=world_size, num_workers=0)
 
     if rank == 0:
         print('===> Building model ', opt.model_type)
@@ -168,7 +174,7 @@ def main(rank, world_size):
         model = DBPNLL(num_channels=1, base_filter=64,  feat = 256, num_stages=10, scale_factor=opt.upscale_factor, residual=opt.residual)
         model, optimizer, start_epoch = load_checkpoint(model, optimizer, rank)
 
-    model = DBPNLL(num_channels=1, base_filter=64,  feat = 256, num_stages=10, scale_factor=opt.upscale_factor).to(rank)
+    model = DBPNLL(num_channels=1, base_filter=64,  feat = 256, num_stages=10, scale_factor=16, combination=opt.combination, tuning=True).to(rank)
         
     model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=True)
     #criterion = nn.MSELoss()
@@ -181,13 +187,15 @@ def main(rank, world_size):
 
     optimizer = optim.Adam(model.parameters(), lr=opt.lr, betas=(0.9, 0.999), eps=1e-8)
     i = 0
+    best_val_loss = None
     for epoch in range(opt.start_iter, opt.nEpochs + 1):
         if rank == 0:
             t0 = time.time()
         epoch_loss = 0
         training_data_loader.sampler.set_epoch(epoch)
+        validation_data_loader.sampler.set_epoch(epoch)
+        model.train()
         for iteration, batch in enumerate(training_data_loader, 1):
-            model.train()
             input, target = Variable(batch[0]), Variable(batch[1])
             if cuda:
                 input = input.cuda()
@@ -205,20 +213,38 @@ def main(rank, world_size):
         loss_tensor = torch.tensor([loss.item()], device=rank)
         dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
 
+        epoch_val_loss = 0
+        model.eval()
+        with torch.no_grad():
+            for iteration, batch in enumerate(validation_data_loader, 1):
+                input, target= Variable(batch[0]), Variable(batch[1])
+                if cuda:
+                    input = input.cuda()
+                    target = target.cuda()
+                prediction = model(input)
+                loss_val = criterion(prediction, target)
+                
+                epoch_val_loss += loss_val.data
+            val_loss_tensor = torch.tensor([loss_val.item()], device=rank)
+            dist.all_reduce(val_loss_tensor, op=dist.ReduceOp.SUM)
+
+        if (epoch+1) % (opt.nEpochs/2) == 0:
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] /= 2
+                print('Learning rate decay: lr={}'.format(optimizer.param_groups[0]['lr']))
+                
         if rank == 0:
             average_loss = loss_tensor.item() / world_size
+            val_loss = val_loss_tensor.item() / world_size
             t1 = time.time()
-            print("===> Epoch {} Training: Avg. Loss: {:.4f} || Timer: {:.4f}".format(epoch, average_loss, t1 - t0))
-        if (epoch+1) % (opt.nEpochs/2) == 0:
-            for param_group in optimizer.param_groups:
-                param_group['lr'] /= 10.0
-            print('Learning rate decay: lr={}'.format(optimizer.param_groups[0]['lr']))
+            print("===> Epoch {} Training: Avg. Train Loss: {:.4f}, Val Loss: {:.4f} || Timer: {:.4f}".format(epoch, average_loss, val_loss, t1 - t0))
 
-        if epoch % 10 == 0:
-            checkpoint(epoch, model, optimizer)
-        if i == opt.patience:
-            print('Loss stopped improving at epoch N: {}'.format(epoch))
-            break
+            if best_val_loss is None or val_loss < best_val_loss:
+                checkpoint(epoch, model, optimizer)
+                best_val_loss = val_loss
+            if i == opt.patience:
+                print('Loss stopped improving at epoch N: {}'.format(epoch))
+                break
 
     cleanup()
 

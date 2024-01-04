@@ -7,12 +7,12 @@
 #SBATCH --time=4-00:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=32
-#SBATCH --gres=gpu:2
+#SBATCH --cpus-per-task=16
+#SBATCH --gres=gpu:1
 
 #nvidia-smi
 #nvcc --version
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate gpu_current2
 
-srun python -u hyperparameter_tuning.py --start_iter 1 --patch_size 32 --gpus 2 --hr_train_dataset /home/ar1619/DBPN_2/MOD_tensor --hr_valid_dataset /home/ar1619/DBPN_2/MOD_tensor_val
+srun python -u hyperparameter_tuning.py --start_iter 1 --patch_size 32 --gpus 1 --hr_train_dataset ../MOD_tensor

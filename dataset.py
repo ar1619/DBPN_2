@@ -154,7 +154,7 @@ class DatasetFromFolder(data.Dataset):
         return len(self.image_filenames)
 
 class DatasetFromFolderEval(data.Dataset):
-    def __init__(self, lr_dir, out_dir, upscale_factor, quantize=False, transform=None):
+    def __init__(self, lr_dir, out_dir, upscale_factor, decimals, quantize=False, transform=None, shuffle=False):
         super(DatasetFromFolderEval, self).__init__()
         list_original = [filename for filename in listdir(lr_dir)]
         list_done = [filename for filename in listdir(out_dir)]
@@ -163,14 +163,18 @@ class DatasetFromFolderEval(data.Dataset):
         self.upscale_factor = upscale_factor
         self.transform = transform
         self.quantize = quantize
+        self.decimals = decimals
 
-        self.image_filenames.sort()
+        if shuffle:
+            random.shuffle(self.image_filenames)
+        else:
+            self.image_filenames.sort()
     def __getitem__(self, index):
         input = load_img(self.image_filenames[index])
         _, file = os.path.split(self.image_filenames[index])
         
         if self.quantize:
-            input = quantize_array(input, 2)
+            input = quantize_array(input, self.decimals)
 
         if self.transform:
             input = self.transform(input)
@@ -182,16 +186,23 @@ class DatasetFromFolderEval(data.Dataset):
         return len(self.image_filenames)
     
 class DatasetFromFolderValid(data.Dataset):
-    def __init__(self, hr_dir, upscale_factor, transform=None):
+    def __init__(self, hr_dir, upscale_factor, decimals, quantize, transform=None):
         super(DatasetFromFolderValid, self).__init__()
         self.image_filenames = [join(hr_dir, x) for x in listdir(hr_dir) if is_image_file(x)]
         self.upscale_factor = upscale_factor
         self.transform = transform
+        self.quantize = quantize
+        self.decimals = decimals
+
+        random.shuffle(self.image_filenames)
 
     def __getitem__(self, index):
         target = load_img(self.image_filenames[index])
         input = pyramid_reduce(target, downscale=self.upscale_factor, sigma=None, order=3, mode='reflect', cval=0, channel_axis=2)
         _, file = os.path.split(self.image_filenames[index])
+
+        if self.quantize:
+            input = quantize_array(input, self.decimals)
         
         if self.transform:
             input = self.transform(input)

@@ -16,4 +16,4 @@
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate gpu_current2
 
-srun python eval.py --upscale_factor 16 --input_dir Input --output Result --test_dataset XCO2 --model weights/MOD_tensorese-hivemind1channel_20.pth
+srun python eval.py --upscale_factor 16 --combination 2 --input_dir Input --output Result --test_dataset XCO2 --model weights/DBPNLLITER2.pth
