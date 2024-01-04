@@ -1,0 +1,17 @@
+#PBS -l walltime=24:00:00
+#PBS -l select=1:ncpus=8:mem=32gb:ngpus=4
+#PBS -o outlogs_r
+#PBS -e errlogs_r
+
+
+module load anaconda3/personal
+source activate gpu
+
+cd $PBS_O_WORKDIR
+
+python main.py --hr_train_dataset ../DBPN_original/DIV2K_train_HR --nEpochs 300 --upscale_factor 4 --gpus 4 --prefix replicate_no_residual_4 
+
+
+
+
+
