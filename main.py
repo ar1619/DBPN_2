@@ -36,6 +36,7 @@ parser.add_argument('--seed', type=int, default=123, help='random seed to use. D
 parser.add_argument('--gpus', default=1, type=int, help='number of gpu')
 parser.add_argument('--data_dir', type=str, default='')
 parser.add_argument('--quantize', type=bool, default=True)
+parser.add_argument('--name', type=str, default='')
 parser.add_argument('--decimals', type=int, default=2)
 parser.add_argument('--combination', type=int, default=1, help='combination of kernel, stride and padding')
 parser.add_argument('--noise_level', type=float, default=0.01)
@@ -135,7 +136,7 @@ def checkpoint(epoch, model, optimizer):
             'model': model.module.state_dict(),
             'optimizer': optimizer.state_dict()
         }
-        model_out_path = opt.save_folder + opt.model_type + "_post_tuning" + ".pth"
+        model_out_path = opt.save_folder + opt.name + "_post_tuning" + ".pth"
         torch.save(checkpoint, model_out_path)
         print("Checkpoint saved to {}".format(model_out_path))
 
@@ -178,7 +179,7 @@ def main(rank, world_size):
         
     model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=True)
     #criterion = nn.MSELoss()
-    criterion = nn.L1Loss().to(rank)
+    criterion = nn.L1Loss(reduction='none').to(rank)
 
     if rank == 0:
         print('---------- Networks architecture -------------')
@@ -191,12 +192,11 @@ def main(rank, world_size):
     for epoch in range(opt.start_iter, opt.nEpochs + 1):
         if rank == 0:
             t0 = time.time()
-        epoch_loss = 0
         training_data_loader.sampler.set_epoch(epoch)
         validation_data_loader.sampler.set_epoch(epoch)
         model.train()
         for iteration, batch in enumerate(training_data_loader, 1):
-            input, target = Variable(batch[0]), Variable(batch[1])
+            input, target, mask = Variable(batch[0]), Variable(batch[1]), Variable(batch[2])
             if cuda:
                 input = input.cuda()
 
@@ -205,8 +205,10 @@ def main(rank, world_size):
 
             if cuda:
                 target = target.to(prediction.device)
+                mask = mask.to(prediction.device)
             loss = criterion(prediction, target)
-            epoch_loss += loss.data
+            loss = loss * mask
+            loss = loss.sum() / mask.sum()
             loss.backward()
             optimizer.step()
 
@@ -217,7 +219,7 @@ def main(rank, world_size):
         model.eval()
         with torch.no_grad():
             for iteration, batch in enumerate(validation_data_loader, 1):
-                input, target= Variable(batch[0]), Variable(batch[1])
+                input, target = Variable(batch[0]), Variable(batch[1])
                 if cuda:
                     input = input.cuda()
                     target = target.cuda()

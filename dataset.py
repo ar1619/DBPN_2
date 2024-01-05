@@ -25,6 +25,20 @@ def normalize_array(data):
     
     return data
 
+def create_mask(data):
+    """
+    Returns a mask where the mask has the value 1 for non-negative elements
+    and 0 for negative elements of the input array.
+
+    Parameters:
+    - data: A NumPy array.
+
+    Returns:
+    - A NumPy array of integers (0 and 1), where the shape is the same as the input array.
+    """
+    mask = (data >= 0).astype(int)
+    return mask
+
 def quantize_array(data, decimals):
     data = np.round(data, decimals)
     data = np.float32(data)
@@ -144,11 +158,13 @@ class DatasetFromFolder(data.Dataset):
         if self.data_augmentation:
             input, target, _ = augment(input, target)
         
+        mask = create_mask(target)
         if self.transform:
             input = self.transform(input.copy())
             target = self.transform(target.copy())
+            mask = self.transform(mask.copy())
                 
-        return input, target
+        return input, target, mask
 
     def __len__(self):
         return len(self.image_filenames)

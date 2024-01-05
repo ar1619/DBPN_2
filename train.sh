@@ -16,4 +16,4 @@
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate gpu_current2
 
-srun python -u main.py --nEpochs 2 --start_iter 1 --upscale_factor 16 --patch_size 32 --lr 0.00025 --noise_level 0.005 --decimals 5 --batchSize 4 --combination 2 --gpus 2 --hr_train_dataset ../MOD_tensor --hr_valid_dataset /home/ar1619/DBPN_2/MOD_tensor_val
+srun python -u main.py --nEpochs 100 --start_iter 1 --upscale_factor 16 --patch_size 32 --lr 0.00025 --name replica --noise_level 0.01 --decimals 5 --batchSize 4 --combination 2 --gpus 2 --hr_train_dataset ../MOD_tensor --hr_valid_dataset /home/ar1619/DBPN_2/MOD_tensor_val
