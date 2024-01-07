@@ -19,6 +19,7 @@ import ray
 from ray import train, tune
 from ray.tune.search.hyperopt import HyperOptSearch
 
+import tqdm
 import pdb
 import socket
 import time
@@ -116,7 +117,7 @@ def train_ddp(config, num_epochs):
     criterion = nn.L1Loss(reduction='none').cuda()
     
     # Training loop.
-    for epoch in range(num_epochs):
+    for epoch in tqdm(range(num_epochs), desc="Epochs"):
         t0 = time.time()
         epoch_loss = 0
         for iteration, batch in enumerate(training_data_loader, 1):
