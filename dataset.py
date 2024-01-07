@@ -15,15 +15,12 @@ def is_image_file(filename):
 
 def normalize_array(data):
     vmax = np.amax(data)
-    vmin = np.amin(data)
+    vmin = np.min(np.where(data >= 0, data, np.inf))
     range_data = vmax - vmin
     
     normalized_data = (data - vmin)/range_data
-    threshold = - 1./range_data
-    data = np.maximum(normalized_data,threshold)
-    data[data == threshold] = -1
     
-    return data
+    return normalized_data
 
 def create_mask(data):
     """
