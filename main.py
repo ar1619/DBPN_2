@@ -215,18 +215,18 @@ def main(rank, world_size):
         loss_tensor = torch.tensor([loss.item()], device=rank)
         dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
 
-        epoch_val_loss = 0
         model.eval()
         with torch.no_grad():
             for iteration, batch in enumerate(validation_data_loader, 1):
-                input, target = Variable(batch[0]), Variable(batch[1])
+                input, target, mask = Variable(batch[0]), Variable(batch[1]), Variable(batch[2])
                 if cuda:
                     input = input.cuda()
                     target = target.cuda()
+                    mask = mask.cuda()
                 prediction = model(input)
                 loss_val = criterion(prediction, target)
-                
-                epoch_val_loss += loss_val.data
+                loss_val = loss_val * mask
+                loss_val = loss_val.sum() / mask.sum()
             val_loss_tensor = torch.tensor([loss_val.item()], device=rank)
             dist.all_reduce(val_loss_tensor, op=dist.ReduceOp.SUM)
 

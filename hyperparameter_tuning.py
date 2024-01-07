@@ -25,7 +25,7 @@ import time
 
 # Training settings
 parser = argparse.ArgumentParser(description='PyTorch Super Res Example')
-parser.add_argument('--nEpochs', type=int, default=2000, help='number of epochs to train for')
+parser.add_argument('--num_epochs', type=int, default=10, help='number of epochs to train for per trial')
 parser.add_argument('--start_iter', type=int, default=1, help='Starting Epoch')
 parser.add_argument('--gpu_mode', type=bool, default=True)
 parser.add_argument('--patience', type=int, default=10, help='patience value for early stopping')
@@ -33,6 +33,7 @@ parser.add_argument('--threads', type=int, default=1, help='number of threads fo
 parser.add_argument('--seed', type=int, default=123, help='random seed to use. Default=123')
 parser.add_argument('--gpus', default=1, type=int, help='number of gpu')
 parser.add_argument('--data_dir', type=str, default='')
+parser.add_argument('--num_samples', type=int, default=10, help='number of samples to tune hyperparameters')
 parser.add_argument('--data_augmentation', type=bool, default=True)
 parser.add_argument('--hr_train_dataset', type=str, default='../../RDS/DIV2K/DIV2K_train_HR_16')
 parser.add_argument('--hr_valid_dataset', type=str, default='../../RDS/DIV2K/DIV2K_valid_HR_16')
@@ -102,7 +103,7 @@ torch.manual_seed(opt.seed)
 if cuda:
     torch.cuda.manual_seed(opt.seed)
 
-def train_ddp(config, num_epochs=10):
+def train_ddp(config, num_epochs):
 
     train_set = get_training_set(opt.data_dir, opt.hr_train_dataset, 16, config['noise_level'], opt.patch_size, opt.data_augmentation, config['decimals'], quantize=True)
     training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=4, shuffle=True)
@@ -112,7 +113,7 @@ def train_ddp(config, num_epochs=10):
 
     model = DBPNLL(num_channels=1, base_filter=64,  feat = 256, num_stages=10, scale_factor=16, combination=config['combination'], tuning=True).cuda()
     optimizer = optim.Adam(model.parameters(), lr=config["lr"], betas=(0.9, 0.999), eps=1e-8)
-    criterion = nn.L1Loss().cuda()
+    criterion = nn.L1Loss(reduction='none').cuda()
     
     # Training loop.
     for epoch in range(num_epochs):
@@ -120,17 +121,19 @@ def train_ddp(config, num_epochs=10):
         epoch_loss = 0
         for iteration, batch in enumerate(training_data_loader, 1):
             model.train()
-            input, target = Variable(batch[0]), Variable(batch[1])
+            input, target, mask = Variable(batch[0]), Variable(batch[1]), Variable(batch[2])
             if cuda:
                 input = input.cuda()
-                target = target.cuda()
 
             optimizer.zero_grad()
             prediction = model(input)
 
             if cuda:
                 target = target.to(prediction.device)
+                mask = mask.to(prediction.device)
             loss = criterion(prediction, target)
+            loss = loss*mask
+            loss = loss.sum()/mask.sum()
             epoch_loss += loss.item()
             loss.backward()
             optimizer.step()
@@ -146,12 +149,15 @@ def train_ddp(config, num_epochs=10):
         model.eval()
         with torch.no_grad():
             for iteration, batch in enumerate(validation_data_loader, 1):
-                input, target= Variable(batch[0]), Variable(batch[1])
+                input, target, mask= Variable(batch[0]), Variable(batch[1]), Variable(batch[2])
                 if cuda:
                     input = input.cuda()
                     target = target.cuda()
+                    mask = mask.cuda()
                 prediction = model(input)
                 loss_val = criterion(prediction, target)
+                loss_val = loss_val*mask
+                loss_val = loss_val.sum()/mask.sum()
                 
                 epoch_val_loss += loss_val.item()
             val_loss = epoch_val_loss / len(validation_data_loader)
@@ -163,9 +169,9 @@ def train_ddp(config, num_epochs=10):
 def tune_ddp(num_samples, num_epochs, gpus_per_trial=1):
     # Hyperparameters search space.
     config = {
-        "lr": tune.loguniform(1e-5, 5e-4),
-        "noise_level": tune.choice([0.05, 0.01, 0.005]),
-        "decimals": tune.choice([2, 3, 4, 5]),
+        "lr": tune.loguniform(1e-5, 1e-4),
+        "noise_level": tune.loguniform(0.01, 0.05),
+        "decimals": tune.choice([4, 5]),
         "combination": tune.choice([1, 2])
     }
     
@@ -178,7 +184,7 @@ def tune_ddp(num_samples, num_epochs, gpus_per_trial=1):
     
     # Tuner.
     analysis = tune.Tuner(
-        tune.with_resources(tune.with_parameters(train_ddp), resources={"cpu": 16, "gpu": gpus_per_trial}),
+        tune.with_resources(tune.with_parameters(train_ddp, num_epochs=num_epochs), resources={"cpu": 16, "gpu": gpus_per_trial}),
         tune_config=tune.TuneConfig(
             metric="val_loss",
             mode="min",
@@ -193,7 +199,7 @@ def tune_ddp(num_samples, num_epochs, gpus_per_trial=1):
     print("Best result: ", best_results)
     print("Best hyperparameters found were: ", best_results.config)
 
-num_samples = 10
-num_epochs = 20
+num_samples = opt.num_samples
+num_epochs = opt.num_epochs
 gpus_per_trial = 1
 tune_ddp(num_samples, num_epochs, gpus_per_trial)

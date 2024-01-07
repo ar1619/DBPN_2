@@ -219,11 +219,12 @@ class DatasetFromFolderValid(data.Dataset):
 
         if self.quantize:
             input = quantize_array(input, self.decimals)
-        
+        mask = create_mask(target)
         if self.transform:
             input = self.transform(input)
             target = self.transform(target)
-        return input, target
+            mask = self.transform(mask)
+        return input, target, mask
       
     def __len__(self):
         return len(self.image_filenames)
