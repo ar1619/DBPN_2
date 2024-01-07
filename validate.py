@@ -45,13 +45,13 @@ def load_checkpoint(model):
     checkpoint = torch.load(opt.model, map_location=lambda storage, loc: storage)
 
     model.load_state_dict(checkpoint['model'])
+    epoch = checkpoint['epoch']
 
-    return model
+    return model, epoch
 
 model = DBPN(num_channels=1, base_filter=64,  feat = 256, num_stages=10, scale_factor=16, combination=opt.combination, tuning=True).cuda()
-model = load_checkpoint(model)
+model, epoch = load_checkpoint(model)
 
-epoch = opt.model[-8:].replace('._1pth','')
 
 criterion = nn.L1Loss().cuda()
 
