@@ -1,0 +1,12 @@
+#PBS -l walltime=00:10:00
+#PBS -l select=1:ncpus=32:mem=2gb:ngpus=1
+#PBS -o val_o_$PBS_JOBID
+#PBS -e val_e_$PBS_JOBID
+
+
+module load anaconda3/personal
+source activate gpu
+
+cd $PBS_O_WORKDIR
+
+python -u validate.py --upscale_factor 16 --combination 2 --decimals 5 --hr_valid_dataset ../../ephemeral/MOD_tensor_val --model weights/replica_post_tuning.pth
