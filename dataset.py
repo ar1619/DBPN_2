@@ -22,6 +22,15 @@ def normalize_array(data):
     
     return normalized_data
 
+def normalize_array_eval(data):
+    vmax = np.amax(data)
+    vmin = np.min(data)
+    range_data = vmax - vmin
+    
+    normalized_data = (data - vmin)/range_data
+    
+    return normalized_data
+
 def create_mask(data):
     """
     Returns a mask where the mask has the value 1 for non-negative elements
@@ -50,6 +59,14 @@ def noise_array(data, noise_level):
 def load_img(filepath):
     img = np.load(filepath)
     img = normalize_array(img)
+    img = np.expand_dims(img, axis = 2)
+    img = np.float32(img)
+    #y, _, _ = img.split()
+    return img
+
+def load_img_eval(filepath):
+    img = np.load(filepath)
+    img = normalize_array_eval(img)
     img = np.expand_dims(img, axis = 2)
     img = np.float32(img)
     #y, _, _ = img.split()
@@ -183,7 +200,7 @@ class DatasetFromFolderEval(data.Dataset):
         else:
             self.image_filenames.sort()
     def __getitem__(self, index):
-        input = load_img(self.image_filenames[index])
+        input = load_img_eval(self.image_filenames[index])
         _, file = os.path.split(self.image_filenames[index])
         
         if self.quantize:
