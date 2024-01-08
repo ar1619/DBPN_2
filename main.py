@@ -14,6 +14,8 @@ import torch.backends.cudnn as cudnn
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 import torch.multiprocessing as mp
+from torch.cuda.amp import autocast, GradScaler
+
 from model import Net as DBPNLL
 from data import get_training_set, get_validation_set
 import pdb
@@ -46,8 +48,8 @@ parser.add_argument('--hr_valid_dataset', type=str, default='../MOD_tensor_valid
 parser.add_argument('--model_type', type=str, default='DBPNLL')
 parser.add_argument('--residual', type=bool, default=False)
 parser.add_argument('--patch_size', type=int, default=32, help='Size of cropped HR image')
-parser.add_argument('--pretrained_sr', default='MIX2K_LR_aug_x4dl10DBPNITERtpami_epoch_399.pth', help='sr pretrained base model')
-parser.add_argument('--pretrained', type=bool, default=False)
+parser.add_argument('--model', default='MIX2K_LR_aug_x4dl10DBPNITERtpami_epoch_399.pth', help='sr pretrained base model')
+parser.add_argument('--pretrained', type=bool, default=True)
 parser.add_argument('--save_folder', default='weights/', help='Location to save checkpoint models')
 parser.add_argument('--prefix', default='1channel', help='Location to save checkpoint models')
 #parser.add_argument('--weight_decay', type=float, default=0.0001, help='Weight decay')
@@ -142,7 +144,7 @@ def checkpoint(epoch, model, optimizer):
 
 def load_checkpoint(model, optimizer, rank):
     loc = 'cuda:{}'.format(torch.distributed.get_rank())
-    checkpoint = torch.load(opt.pretrained_sr, map_location=loc)
+    checkpoint = torch.load(opt.model, map_location=loc)
 
     model.load_state_dict(checkpoint['model'])
     optimizer.load_state_dict(checkpoint['optimizer'])
@@ -172,12 +174,16 @@ def main(rank, world_size):
         print('===> Building model ', opt.model_type)
 
     if opt.pretrained:
-        model = DBPNLL(num_channels=1, base_filter=64,  feat = 256, num_stages=10, scale_factor=opt.upscale_factor, residual=opt.residual)
+        model = DBPNLL(num_channels=1, base_filter=64,  feat = 256, num_stages=10, scale_factor=16, combination=opt.combination, tuning=True).to(rank)
+        optimizer = optim.Adam(model.parameters(), lr=opt.lr, betas=(0.9, 0.999), eps=1e-8)
         model, optimizer, start_epoch = load_checkpoint(model, optimizer, rank)
-
-    model = DBPNLL(num_channels=1, base_filter=64,  feat = 256, num_stages=10, scale_factor=16, combination=opt.combination, tuning=True).to(rank)
-        
-    model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=True)
+        epoch_start = start_epoch
+    else:
+        model = DBPNLL(num_channels=1, base_filter=64,  feat = 256, num_stages=10, scale_factor=16, combination=opt.combination, tuning=True).to(rank)
+        model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=True)
+        optimizer = optim.Adam(model.parameters(), lr=opt.lr, betas=(0.9, 0.999), eps=1e-8)
+        epoch_start = opt.start_iter
+    
     #criterion = nn.MSELoss()
     criterion = nn.L1Loss(reduction='none').to(rank)
 
@@ -185,11 +191,10 @@ def main(rank, world_size):
         print('---------- Networks architecture -------------')
         print_network(model)
         print('----------------------------------------------')
-
-    optimizer = optim.Adam(model.parameters(), lr=opt.lr, betas=(0.9, 0.999), eps=1e-8)
+    scaler = GradScaler()
     i = 0
     best_val_loss = None
-    for epoch in range(opt.start_iter, opt.nEpochs + 1):
+    for epoch in range(epoch_start, opt.nEpochs + 1):
         if rank == 0:
             t0 = time.time()
         training_data_loader.sampler.set_epoch(epoch)
@@ -201,16 +206,19 @@ def main(rank, world_size):
                 input = input.cuda()
 
             optimizer.zero_grad()
-            prediction = model(input)
+            with autocast():
+                prediction = model(input)
 
-            if cuda:
-                target = target.to(prediction.device)
-                mask = mask.to(prediction.device)
-            loss = criterion(prediction, target)
-            loss = loss * mask
-            loss = loss.sum() / mask.sum()
-            loss.backward()
-            optimizer.step()
+                if cuda:
+                    target = target.to(prediction.device)
+                    mask = mask.to(prediction.device)
+                loss = criterion(prediction, target)
+                loss = loss * mask
+                loss = loss.sum() / mask.sum()
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+
+            scaler.update()
 
         loss_tensor = torch.tensor([loss.item()], device=rank)
         dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
@@ -242,6 +250,7 @@ def main(rank, world_size):
             print("===> Epoch {} Training: Avg. Train Loss: {:.4f}, Val Loss: {:.4f} || Timer: {:.4f}".format(epoch, average_loss, val_loss, t1 - t0))
 
             if best_val_loss is None or val_loss < best_val_loss:
+                print("Checkpoint at epoch {} || Val. Loss: {:.7f}".format(epoch, val_loss))
                 checkpoint(epoch, model, optimizer)
                 best_val_loss = val_loss
             if i == opt.patience:

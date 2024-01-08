@@ -53,7 +53,7 @@ model = DBPN(num_channels=1, base_filter=64,  feat = 256, num_stages=10, scale_f
 model, epoch = load_checkpoint(model)
 
 
-criterion = nn.L1Loss().cuda()
+criterion = nn.L1Loss(reduction='none').cuda()
 
 validation_set = get_validation_set(opt.data_dir, opt.hr_valid_dataset, 16, opt.decimals, quantize=True)
 validation_data_loader = DataLoader(dataset=validation_set, num_workers=opt.threads, batch_size=opt.testBatchSize, shuffle=False)
@@ -62,12 +62,15 @@ epoch_val_loss = 0
 model.eval()
 with torch.no_grad():
     for iteration, batch in enumerate(validation_data_loader, 1):
-        input, target= Variable(batch[0]), Variable(batch[1])
+        input, target, mask= Variable(batch[0]), Variable(batch[1]), Variable(batch[2])
         if cuda:
             input = input.cuda()
             target = target.cuda()
+            mask = mask.cuda()
         prediction = model(input)
         loss_val = criterion(prediction, target)
+        loss_val = loss_val * mask
+        loss_val = loss_val.sum() / mask.sum()
         
         epoch_val_loss += loss_val.item()
     val_loss = epoch_val_loss / len(validation_data_loader)
