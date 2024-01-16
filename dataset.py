@@ -124,7 +124,7 @@ def augment(img_in, img_tar, flip_h=True, rot=True):
     return img_in, img_tar, info_aug
 
 class DatasetFromFolder(data.Dataset):
-    def __init__(self, image_dir, patch_size, upscale_factor, noise_level, data_augmentation, decimals=0, quantize=False, transform=None):
+    def __init__(self, image_dir, patch_size, upscale_factor, noise_level, noise, data_augmentation, decimals=5, quantize=False, transform=None):
         super(DatasetFromFolder, self).__init__()
         self.image_filenames = [join(image_dir, x) for x in listdir(image_dir) if is_image_file(x)]
         self.patch_size = patch_size
@@ -132,6 +132,7 @@ class DatasetFromFolder(data.Dataset):
         self.transform = transform
         self.data_augmentation = data_augmentation
         self.noise_level = noise_level
+        self.noise = noise
         self.decimals = decimals
         self.quantize = quantize
         if self.upscale_factor == 2:
@@ -161,7 +162,8 @@ class DatasetFromFolder(data.Dataset):
 
         else:
             input = pyramid_reduce(target, downscale=self.upscale_factor, sigma=None, order=3, mode='constant', cval=0, channel_axis=2)
-            input = noise_array(input, self.noise_level)
+            if self.noise:
+                input = noise_array(input, self.noise_level)
         
         input, target, _ = get_patch(input,target,self.patch_size, self.upscale_factor)
 
@@ -207,16 +209,19 @@ class DatasetFromFolderEval(data.Dataset):
             input = quantize_array(input, self.decimals)
 
         if self.transform:
-            input = self.transform(input)
+            try:
+                input = self.transform(input)
+            except:
+                input = torch.tensor(input)
             
-        print(input.shape)
+        # print(input.shape)
         return input, file
       
     def __len__(self):
         return len(self.image_filenames)
     
 class DatasetFromFolderValid(data.Dataset):
-    def __init__(self, hr_dir, upscale_factor, decimals, quantize, transform=None):
+    def __init__(self, hr_dir, upscale_factor, decimals=5, quantize=False, transform=None):
         super(DatasetFromFolderValid, self).__init__()
         self.image_filenames = [join(hr_dir, x) for x in listdir(hr_dir) if is_image_file(x)]
         self.upscale_factor = upscale_factor
