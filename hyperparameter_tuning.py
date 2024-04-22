@@ -11,6 +11,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.backends.cudnn as cudnn
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
+from torch.cuda.amp import autocast, GradScaler
 import torch.multiprocessing as mp
 from model import Net as DBPNLL
 from data import get_training_set, get_validation_set
@@ -19,14 +20,13 @@ import ray
 from ray import train, tune
 from ray.tune.search.hyperopt import HyperOptSearch
 
-import tqdm
 import pdb
 import socket
 import time
 
 # Training settings
 parser = argparse.ArgumentParser(description='PyTorch Super Res Example')
-parser.add_argument('--num_epochs', type=int, default=10, help='number of epochs to train for per trial')
+parser.add_argument('--num_epochs', type=int, default=25, help='number of epochs to train for per trial')
 parser.add_argument('--start_iter', type=int, default=1, help='Starting Epoch')
 parser.add_argument('--gpu_mode', type=bool, default=True)
 parser.add_argument('--patience', type=int, default=10, help='patience value for early stopping')
@@ -106,18 +106,19 @@ if cuda:
 
 def train_ddp(config, num_epochs):
 
-    train_set = get_training_set(opt.data_dir, opt.hr_train_dataset, 16, config['noise_level'], opt.patch_size, opt.data_augmentation, config['decimals'], quantize=True)
-    training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=4, shuffle=True)
+    train_set = get_training_set(opt.data_dir, opt.hr_train_dataset, 16, 0.015, config['noise'], opt.patch_size, opt.data_augmentation, 5, config['quantize'])
+    training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=config['batch_size'], shuffle=True)
 
-    validation_set = get_validation_set(opt.data_dir, opt.hr_valid_dataset, 16, config['decimals'], quantize=True)
+    validation_set = get_validation_set(opt.data_dir, opt.hr_valid_dataset, 16, 5, quantize=config['quantize'])
     validation_data_loader = DataLoader(dataset=validation_set, num_workers=opt.threads, batch_size=1, shuffle=False)
 
     model = DBPNLL(num_channels=1, base_filter=64,  feat = 256, num_stages=10, scale_factor=16, combination=config['combination'], tuning=True).cuda()
     optimizer = optim.Adam(model.parameters(), lr=config["lr"], betas=(0.9, 0.999), eps=1e-8)
     criterion = nn.L1Loss(reduction='none').cuda()
+    scaler = GradScaler()
     
     # Training loop.
-    for epoch in tqdm(range(num_epochs), desc="Epochs"):
+    for epoch in range(num_epochs):
         t0 = time.time()
         epoch_loss = 0
         for iteration, batch in enumerate(training_data_loader, 1):
@@ -127,17 +128,32 @@ def train_ddp(config, num_epochs):
                 input = input.cuda()
 
             optimizer.zero_grad()
-            prediction = model(input)
+            if config['batch_size'] == 8:
+                with autocast():
+                    prediction = model(input)
 
-            if cuda:
-                target = target.to(prediction.device)
-                mask = mask.to(prediction.device)
-            loss = criterion(prediction, target)
-            loss = loss*mask
-            loss = loss.sum()/mask.sum()
-            epoch_loss += loss.item()
-            loss.backward()
-            optimizer.step()
+                    if cuda:
+                        target = target.to(prediction.device)
+                        mask = mask.to(prediction.device)
+                    loss = criterion(prediction, target)
+                    loss = loss * mask
+                    loss = loss.sum() / mask.sum()
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+
+                scaler.update()
+            else:
+                prediction = model(input)
+
+                if cuda:
+                    target = target.to(prediction.device)
+                    mask = mask.to(prediction.device)
+                loss = criterion(prediction, target)
+                loss = loss*mask
+                loss = loss.sum()/mask.sum()
+                epoch_loss += loss.item()
+                loss.backward()
+                optimizer.step()
             # print("===> Epoch[{}]({}/{}): Loss: {:.4f} || Timer: {:.4f} sec.".format(epoch, iteration, len(training_data_loader), loss.item(), (t_iter - t_inter)))
 
         t_iter = time.time()
@@ -171,8 +187,9 @@ def tune_ddp(num_samples, num_epochs, gpus_per_trial=1):
     # Hyperparameters search space.
     config = {
         "lr": tune.loguniform(1e-5, 1e-4),
-        "noise_level": tune.loguniform(0.01, 0.05),
-        "decimals": tune.choice([4, 5]),
+        "noise": tune.choice([True, False]),
+        "quantize": tune.choice([True, False]),
+        "batch_size": tune.choice([4, 8]),
         "combination": tune.choice([1, 2])
     }
     
