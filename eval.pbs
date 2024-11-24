@@ -1,7 +1,7 @@
 #PBS -l walltime=00:30:00
-#PBS -l select=1:ncpus=32:mem=2gb:ngpus=1
-#PBS -o val_o_$PBS_JOBID
-#PBS -e val_e_$PBS_JOBID
+#PBS -l select=1:ncpus=32:mem=4gb:ngpus=1
+#PBS -o eval_o
+#PBS -e eval_e
 
 
 module load anaconda3/personal
@@ -9,24 +9,4 @@ source activate gpu
 
 cd $PBS_O_WORKDIR
 
-python eval.py --upscale_factor 16 --combination 2 --input_dir Input --output Result --test_dataset XCO2 --model weights/DBPNLL_post_tuning_51.pth
-
-#!/bin/bash -l
-
-#SBATCH --job-name=cent_arr_sr
-#SBATCH -e sr_w_noise-%j.err
-#SBATCH -o sr_w_noise-%j.out
-#SBATCH --mem-per-cpu=1500
-#SBATCH --time=0-12:00:00
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --ntasks-per-socket=1
-#SBATCH --cpus-per-task=32
-#SBATCH --gres=gpu:1
-
-#nvidia-smi
-#nvcc --version
-source ~/anaconda3/etc/profile.d/conda.sh
-conda activate gpu_current2
-
-srun python eval.py --upscale_factor 16 --combination 2 --input_dir Input --output Result --test_dataset XCO2 --model weights/DBPNLLITER2.pth
+python eval.py --upscale_factor 16 --combination 2 --input_dir ../../OCO-2 --output ../../OCO-2/SR_2 --test_dataset centered_arrays --model weights/new_loss_post_tuning.pth
