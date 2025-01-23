@@ -5,6 +5,7 @@ from netCDF4 import Dataset as NetCDFFile
 import netCDF4 as nc
 import json
 import xarray as xr
+import time
 
 import os
 
@@ -48,23 +49,31 @@ def sample_within_coordinates(array, coordinates, lon, lat):
     else:
         return random_window(array[latS:latN, lonW:lonE])
 
-def bin_values(array, bins=11):
+def bin_values(array, bins=100):
     binned_array = np.digitize(array, np.linspace(0, 1, bins))
     
     return binned_array
 
-def gridify_than_normalize(data):
-    sub_arrays_binned = []
+def gridify_than_normalize(data, oco2=False):
+    norm_arrays = [0 for i in range(100)]
     # data = np.asarray(data)
     for i in range(0, data.shape[0], 32):
         for j in range(0, data.shape[1], 32):
             sub_array = data[i:i+32, j:j+32]
-            if sub_array[~sub_array.mask].size > 0:
-                norm_sub_array = normalize_array(sub_array[~sub_array.mask])
+            if oco2:
+                norm_sub_array = normalize_array(sub_array)
                 bin_samples = bin_values(norm_sub_array)
-                bin_count = np.bincount(bin_samples)
-                sub_arrays_binned.append(bin_count)
-    return sub_arrays_binned
+                bin_count = np.bincount(bin_samples.flatten())
+                if len(bin_count) == 101:
+                    norm_arrays = [x + y for x, y in zip(norm_arrays, bin_count)]
+            else:
+                if sub_array[~sub_array.mask].size > 0:
+                    norm_sub_array = normalize_array(sub_array[~sub_array.mask])
+                    bin_samples = bin_values(norm_sub_array)
+                    bin_count = np.bincount(bin_samples)
+                    if len(bin_count) == 101:
+                        norm_arrays = [x + y for x, y in zip(norm_arrays, bin_count)]
+    return norm_arrays
 
 # regions = {
 #     'Europe': europe_box,
@@ -104,18 +113,52 @@ def gridify_than_normalize(data):
 #     print('Error saving oco2 json file')
 
 # Print current location
-print(os.getcwd())
-modis_bins = []
-for filename in os.listdir('../RDS/earthdata/MOD11C1_061-20241106_171429/'):
-    file = nc.Dataset('../RDS/earthdata/MOD11C1_061-20241106_171429/'+filename, 'r')
-    temp_data = file['LST_Day_CMG'][:]
-    gridified_data = gridify_than_normalize(temp_data)
-    filtered_gridified_data = [item for item in gridified_data if len(item) == 12]
-    filtered_gridified_data = np.asarray(filtered_gridified_data)[:, 1:11]
-    filtered_gridified_data_avg = np.mean(filtered_gridified_data, axis=0)
-    modis_bins.append(filtered_gridified_data_avg)
+
+
+### MODIS DISTRIBUTION
+# print(os.getcwd())
+# modis_dist = [0 for i in range(101)]
+# i = 0
+# start_time = time.time()
+# nb_files = len(os.listdir('/scratch_hive/ar1619/RDS/earthdata/MOD11C1_061-20241106_171429/'))
+# for filename in os.listdir('/scratch_hive/ar1619/RDS/earthdata/MOD11C1_061-20241106_171429/'):
+#     try:
+#         file = nc.Dataset('/scratch_hive/ar1619/RDS/earthdata/MOD11C1_061-20241106_171429/'+filename, 'r')
+#         temp_data = file['LST_Day_CMG'][:]
+#         normed_data = gridify_than_normalize(temp_data)
+#         modis_dist = [x + y for x, y in zip(modis_dist, normed_data)]
+#         i += 1
+#         if i % 100 == 0:
+#             current_time = time.time()
+#             print(f'{i}/{nb_files} files processed', current_time - start_time)
+#     except:
+#         print('Error processing file', filename)
+
+# try:    
+#     np.save('modis_dist.npy', modis_dist)
+# except:
+#     print('Error saving modis numpy array')
+
+### OCO-2 Distribution
+
+oco2_dist = [0 for i in range(101)]
+i = 0
+start_time = time.time()
+nb_files = len(os.listdir('../Point_source_detection/data/OCO-2/'))
+for filename in os.listdir('../Point_source_detection/data/OCO-2/'):
+    try:
+        file = xr.open_dataset('../Point_source_detection/data/OCO-2/'+filename)
+        xco2 = file['XCO2'][0,:,:]
+        normed_data = gridify_than_normalize(xco2, oco2=True)
+        oco2_dist = [x + y for x, y in zip(oco2_dist, normed_data)]
+        i += 1
+        if i % 100 == 0:
+            current_time = time.time()
+            print(f'{i}/{nb_files} files processed', current_time - start_time)
+    except:
+        print('Error processing file', filename)
 
 try:    
-    np.save('modis_bins.npy', modis_bins)
+    np.save('oco2_dist.npy', oco2_dist)
 except:
-    print('Error saving modis numpy array')
+    print('Error saving oco2_dist numpy array')

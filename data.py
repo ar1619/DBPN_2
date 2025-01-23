@@ -1,6 +1,6 @@
 from os.path import join
 from torchvision.transforms import Compose, ToTensor
-from dataset import DatasetFromFolderEval, DatasetFromFolder, DatasetFromFolderValid
+from dataset import DatasetFromFolderEval, DatasetFromFolder, DatasetFromFolderValid, DatasetFromFolderOCO2
 
 def transform():
     return Compose([
@@ -21,3 +21,6 @@ def get_eval_set(lr_dir, out_dir, upscale_factor, quantize):
     return DatasetFromFolderEval(lr_dir, out_dir, upscale_factor, quantize,
                              transform=transform())
 
+def get_data_set(oco2_folder, out_dir):
+    return DatasetFromFolderOCO2(oco2_folder, out_dir,
+                             transform=transform())

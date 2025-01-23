@@ -7,6 +7,7 @@ from os.path import join
 from PIL import Image, ImageOps
 from skimage.transform import pyramid_reduce
 import random
+import xarray as xr
 import time
 from random import randrange
 
@@ -30,6 +31,15 @@ def normalize_array_eval(data):
     normalized_data = (data - vmin)/range_data
     
     return normalized_data
+
+def normalize_array_co2(data):
+    vmax = np.amax(data)
+    vmin = np.min(data)
+    range_data = vmax - vmin
+    
+    normalized_data = (data - vmin)/range_data
+    
+    return normalized_data, [vmin, vmax]
 
 def create_mask(data):
     """
@@ -123,6 +133,23 @@ def augment(img_in, img_tar, flip_h=True, rot=True):
     img_tar = np.float32(img_tar)
     return img_in, img_tar, info_aug
 
+def divide_into_windows(file):
+    # rolling window function
+    array = np.array(file['XCO2'][0,:,:])
+    new_array = np.pad(array, ((0,1),(0,0)), 'symmetric')
+    new_array = np.pad(new_array, ((0,0),(4,3)), 'wrap')
+    windows = np.lib.stride_tricks.sliding_window_view(new_array, (32, 32))[::30, ::29]
+    windows = np.expand_dims(windows, axis = 2)
+    windows = np.expand_dims(windows, axis=3)
+    processed_windows = windows.copy()
+    min_max = np.zeros((windows.shape[0], windows.shape[1], 2))
+    # normalize each view
+    for i in range(windows.shape[0]):
+        for j in range(windows.shape[1]):
+            processed_windows[i,j], min_max[i,j] = normalize_array_co2(processed_windows[i,j])
+    processed_windows = np.float32(processed_windows)
+    return processed_windows, min_max
+
 class DatasetFromFolder(data.Dataset):
     def __init__(self, image_dir, patch_size, upscale_factor, noise_level, noise, data_augmentation, decimals=5, quantize=False, transform=None):
         super(DatasetFromFolder, self).__init__()
@@ -214,8 +241,29 @@ class DatasetFromFolderEval(data.Dataset):
             except:
                 input = torch.tensor(input)
             
-        # print(input.shape)
         return input, file
+      
+    def __len__(self):
+        return len(self.image_filenames)
+
+class DatasetFromFolderOCO2(data.Dataset):
+    def __init__(self, oco2_folder, out_dir, transform=None):
+        super(DatasetFromFolderOCO2, self).__init__()
+        list_original = [filename for filename in listdir(oco2_folder)]
+        list_done = [filename.replace('.npy','') for filename in listdir(out_dir)]
+        missing_list = list(set(list_original) - set(list_done))
+        self.image_filenames = [join(oco2_folder, x) for x in missing_list]
+        self.upscale_factor = 16
+
+    def __getitem__(self, index):
+        file = xr.open_dataset(self.image_filenames[index])
+        input, min_max = divide_into_windows(file)
+        _, file = os.path.split(self.image_filenames[index])
+
+        input = torch.tensor(input)
+            
+        # print(input.shape)
+        return input, min_max, file
       
     def __len__(self):
         return len(self.image_filenames)
