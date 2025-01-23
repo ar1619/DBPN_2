@@ -1,7 +1,7 @@
-#PBS -l walltime=04:00:00
+#PBS -l walltime=12:00:00
 #PBS -l select=1:ncpus=32:mem=8gb:ngpus=2
-#PBS -o hp_tun_o.$PBS_JOBID
-#PBS -e hp_tun_e.$PBS_JOBID
+#PBS -o hp_tun_verb_o
+#PBS -e hp_tun_verb_e
 
 
 module load anaconda3/personal
@@ -9,4 +9,4 @@ source activate hp_tuning
 
 cd $PBS_O_WORKDIR
 
-python -u hyperparameter_tuning.py --start_iter 1 --patch_size 32 --gpus 2 --num_samples 2 --hr_train_dataset ../../ephemeral/MOD_tensor --hr_valid_dataset ../../ephemeral/MOD_tensor_val
+python -u hyperparameter_tuning.py --start_iter 1 --patch_size 32 --gpus 2 --num_epochs 2 --hr_train_dataset ../../ephemeral/MOD_tensor --hr_valid_dataset ../../ephemeral/MOD_tensor_val
