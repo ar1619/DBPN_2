@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from model import Net as DBPN
 #from dbpn_v1 import Net as DBPNLL
 #from dbpn_iterative import Net as DBPNITER
-from data import get_eval_set
+from data import get_eval_set_uncert
 from functools import reduce
 
 #import scipy.io as sio
@@ -23,9 +23,7 @@ parser = argparse.ArgumentParser(description='PyTorch Super Res Example')
 parser.add_argument('--upscale_factor', type=int, default=16, help="super resolution upscale factor")
 parser.add_argument('--testBatchSize', type=int, default=1, help='testing batch size')
 parser.add_argument('--gpu_mode', type=bool, default=True)
-parser.add_argument('--self_ensemble', type=bool, default=False)
-parser.add_argument('--chop_forward', type=bool, default=False)
-parser.add_argument('--quantize', type=bool, default=True)
+parser.add_argument('--noise', type=float, default=0.0, help='noise level')
 parser.add_argument('--combination', type=int, default=2)
 parser.add_argument('--threads', type=int, default=1, help='number of threads for data loader to use')
 parser.add_argument('--seed', type=int, default=123, help='random seed to use. Default=123')
@@ -34,7 +32,6 @@ parser.add_argument('--input_dir', type=str, default='Input')
 parser.add_argument('--output', default='Results', help='Location to save checkpoint models')
 parser.add_argument('--test_dataset', type=str, default='XCO2')
 parser.add_argument('--model_type', type=str, default='DBPNLL')
-parser.add_argument('--residual', type=bool, default=False)
 parser.add_argument('--model', default='models/DBPNLL_x8.pth', help='sr pretrained base model')
 
 opt = parser.parse_args()
@@ -58,7 +55,7 @@ if cuda:
     torch.cuda.manual_seed(opt.seed)
 
 #print('===> Loading datasets')
-test_set = get_eval_set(os.path.join(opt.input_dir,opt.test_dataset), os.path.join(opt.output,opt.test_dataset), opt.upscale_factor)
+test_set = get_eval_set_uncert(os.path.join(opt.input_dir,opt.test_dataset), os.path.join(opt.output,opt.test_dataset), opt.upscale_factor, opt.noise)
 testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=opt.testBatchSize, shuffle=False)
 
 #print('===> Building model')
@@ -107,106 +104,37 @@ def eval():
 
         print("===> Processed: %s || Timer: %.4f sec." % (name[0], (t1 - t0)))
         #print(name[0])
-        save_img(prediction.cpu().data, name[0])
+        save_img_sr(prediction.cpu().data, name[0])
+        save_img_lr(input.cpu().data, name[0])
 
-def save_img(img, img_name):
+def save_img_sr(img, img_name):
     save_img = img.squeeze().numpy().transpose(0,1)
     #save_img = img.squeeze().numpy()
     # save img
-    save_dir=os.path.join(opt.output,opt.test_dataset)
+    folder = os.path.join(opt.test_dataset+'/sr', str(opt.noise).replace('.', ''))
+    save_dir=os.path.join(opt.output,folder)
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
         
     save_fn = save_dir +'/'+ img_name
     return np.save(save_fn, save_img)
 
-def x8_forward(img, model, precision='single'):
-    def _transform(v, op):
-        if precision != 'single': v = v.float()
-
-        v2np = v.data.cpu().numpy()
-        if op == 'vflip':
-            tfnp = v2np[:, :, :, ::-1].copy()
-        elif op == 'hflip':
-            tfnp = v2np[:, :, ::-1, :].copy()
-        elif op == 'transpose':
-            tfnp = v2np.transpose((0, 1, 3, 2)).copy()
+def save_img_lr(img, img_name):
+    save_img = img.squeeze().numpy().transpose(0,1)
+    #save_img = img.squeeze().numpy()
+    # save img
+    folder = os.path.join(opt.test_dataset+'/lr', str(opt.noise).replace('.', ''))
+    save_dir=os.path.join(opt.output,folder)
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
         
-        ret = torch.Tensor(tfnp).cuda()
-
-        if precision == 'half':
-            ret = ret.half()
-        elif precision == 'double':
-            ret = ret.double()
-
-        with torch.no_grad():
-            ret = Variable(ret)
-
-        return ret
-
-    inputlist = [img]
-    for tf in 'vflip', 'hflip', 'transpose':
-        inputlist.extend([_transform(t, tf) for t in inputlist])
-
-    outputlist = [model(aug) for aug in inputlist]
-    for i in range(len(outputlist)):
-        if i > 3:
-            outputlist[i] = _transform(outputlist[i], 'transpose')
-        if i % 4 > 1:
-            outputlist[i] = _transform(outputlist[i], 'hflip')
-        if (i % 4) % 2 == 1:
-            outputlist[i] = _transform(outputlist[i], 'vflip')
-    
-    output = reduce((lambda x, y: x + y), outputlist) / len(outputlist)
-
-    return output
-    
-def chop_forward(x, model, scale, shave=8, min_size=80000, nGPUs=opt.gpus):
-    b, c, h, w = x.size()
-    h_half, w_half = h // 2, w // 2
-    h_size, w_size = h_half + shave, w_half + shave
-    inputlist = [
-        x[:, :, 0:h_size, 0:w_size],
-        x[:, :, 0:h_size, (w - w_size):w],
-        x[:, :, (h - h_size):h, 0:w_size],
-        x[:, :, (h - h_size):h, (w - w_size):w]]
-
-    if w_size * h_size < min_size:
-        outputlist = []
-        for i in range(0, 4, nGPUs):
-            with torch.no_grad():
-                input_batch = torch.cat(inputlist[i:(i + nGPUs)], dim=0)
-            if opt.self_ensemble:
-                with torch.no_grad():
-                    output_batch = x8_forward(input_batch, model)
-            else:
-                with torch.no_grad():
-                    output_batch = model(input_batch)
-            outputlist.extend(output_batch.chunk(nGPUs, dim=0))
-    else:
-        outputlist = [
-            chop_forward(patch, model, scale, shave, min_size, nGPUs) \
-            for patch in inputlist]
-
-    h, w = scale * h, scale * w
-    h_half, w_half = scale * h_half, scale * w_half
-    h_size, w_size = scale * h_size, scale * w_size
-    shave *= scale
-
-    with torch.no_grad():
-        output = Variable(x.data.new(b, c, h, w))
-
-    output[:, :, 0:h_half, 0:w_half] \
-        = outputlist[0][:, :, 0:h_half, 0:w_half]
-    output[:, :, 0:h_half, w_half:w] \
-        = outputlist[1][:, :, 0:h_half, (w_size - w + w_half):w_size]
-    output[:, :, h_half:h, 0:w_half] \
-        = outputlist[2][:, :, (h_size - h + h_half):h_size, 0:w_half]
-    output[:, :, h_half:h, w_half:w] \
-        = outputlist[3][:, :, (h_size - h + h_half):h_size, (w_size - w + w_half):w_size]
-
-    return output
+    save_fn = save_dir +'/'+ img_name
+    return np.save(save_fn, save_img)
 
 ##Eval Start!!!!
 
 eval()
+
+# replace 0.01 with a string 001
+n = 0.01
+n = str(n).replace('.', '')

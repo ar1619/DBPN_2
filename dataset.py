@@ -11,6 +11,7 @@ import xarray as xr
 import time
 from random import randrange
 
+
 def is_image_file(filename):
     return any(filename.endswith(extension) for extension in [".png", ".jpg", ".jpeg", ".npy"])
 
@@ -213,7 +214,7 @@ class DatasetFromFolder(data.Dataset):
         return len(self.image_filenames)
 
 class DatasetFromFolderEval(data.Dataset):
-    def __init__(self, lr_dir, out_dir, upscale_factor, decimals, quantize=False, transform=None, shuffle=False):
+    def __init__(self, lr_dir, out_dir, upscale_factor, noise=0, decimals=5, quantize=False, transform=None, shuffle=False):
         super(DatasetFromFolderEval, self).__init__()
         list_original = [filename for filename in listdir(lr_dir)]
         list_done = [filename for filename in listdir(out_dir)]
@@ -223,6 +224,7 @@ class DatasetFromFolderEval(data.Dataset):
         self.transform = transform
         self.quantize = quantize
         self.decimals = decimals
+        self.noise = noise
 
         if shuffle:
             random.shuffle(self.image_filenames)
@@ -231,6 +233,8 @@ class DatasetFromFolderEval(data.Dataset):
     def __getitem__(self, index):
         input = load_img_eval(self.image_filenames[index])
         _, file = os.path.split(self.image_filenames[index])
+        # add gaussian noise with std = self.noise
+        input = noise_array(input, self.noise)
         
         if self.quantize:
             input = quantize_array(input, self.decimals)

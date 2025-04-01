@@ -17,8 +17,12 @@ def get_validation_set(data_dir, hr, upscale_factor, decimals, quantize):
     return DatasetFromFolderValid(hr_dir, upscale_factor, decimals, quantize,
                              transform=transform())
 
-def get_eval_set(lr_dir, out_dir, upscale_factor, quantize):
-    return DatasetFromFolderEval(lr_dir, out_dir, upscale_factor, quantize,
+def get_eval_set(lr_dir, out_dir, upscale_factor):
+    return DatasetFromFolderEval(lr_dir, out_dir, upscale_factor,
+                             transform=transform())
+
+def get_eval_set_uncert(lr_dir, out_dir, upscale_factor, noise):
+    return DatasetFromFolderEval(lr_dir, out_dir, upscale_factor, noise, 
                              transform=transform())
 
 def get_data_set(oco2_folder, out_dir):
