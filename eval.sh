@@ -19,4 +19,4 @@ nvidia-smi
 source /scratch_hive/ar1619/miniconda3/etc/profile.d/conda.sh
 conda activate gpu_current2
 
-srun python eval.py --upscale_factor 16 --combination 2 --input_dir Input --output Result --test_dataset uncertainty --model weights/new_loss_post_tuning.pth
+srun python eval.py --upscale_factor 16 --combination 2 --input_dir Input --output Result --test_dataset uncertainty/sites --model weights/new_loss_post_tuning.pth

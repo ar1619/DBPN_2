@@ -217,7 +217,8 @@ class DatasetFromFolderEval(data.Dataset):
     def __init__(self, lr_dir, out_dir, upscale_factor, noise=0, decimals=5, quantize=False, transform=None, shuffle=False):
         super(DatasetFromFolderEval, self).__init__()
         list_original = [filename for filename in listdir(lr_dir)]
-        list_done = [filename for filename in listdir(out_dir)]
+        # TO REMOVE LATER
+        list_done = [filename for filename in listdir(out_dir+'/sr/'+str(noise).replace('.', '')+'/')]
         missing_list = list(set(list_original) - set(list_done))
         self.image_filenames = [join(lr_dir, x) for x in missing_list if is_image_file(x)]
         self.upscale_factor = upscale_factor
