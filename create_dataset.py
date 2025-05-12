@@ -76,7 +76,6 @@ def eval():
             input, min_max, name = Variable(batch[0]), batch[1], batch[2]
 
         input = input[0]
-        # print(input.size())
         if cuda:
             input = input.cuda(gpus_list[0])
         with torch.no_grad():
@@ -85,15 +84,10 @@ def eval():
                     output = model(input[i][j])
                     output_array = output.cpu().data
                     sr_array[i][j] = output_array.squeeze().numpy()
-                # t1 = time.time()
-                # print("===> Processed: %s || Timer: %.4f sec." % (name[0]+str(i)+str(j), (t1 - t0)))
-                # #print(name[0])
-                # save_file(sr_array[i][j], name[0]+str(i)+str(j))
 
         t1 = time.time()
 
         print("===> Processed: %s || Timer: %.4f sec." % (name[0], (t1 - t0)))
-        # #print(name[0])
         save_file(sr_array, min_max[0].numpy(), name[0])
 
 def unnorm(img, min_max):
@@ -105,16 +99,12 @@ def unnorm(img, min_max):
 def save_file(img, min_max, img_name):
     unnorm_img = unnorm(img, min_max)
     reconstructed_img = unslide(unnorm_img, strategie="mean")
-    # save_img = img.squeeze().numpy().transpose(0,1)
-    #save_img = img.squeeze().numpy()
-    # save img
     save_dir=os.path.join(opt.output,opt.test_dataset)
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
         
     save_fn = save_dir +'/'+ img_name
     return np.save(save_fn, reconstructed_img)
-    # return np.save(save_fn, img)
 
 
 def unslide(sr_array, strategie="mean"):

@@ -8,12 +8,9 @@ import numpy as np
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from model import Net as DBPN
-#from dbpn_v1 import Net as DBPNLL
-#from dbpn_iterative import Net as DBPNITER
 from data import get_validation_set
 from functools import reduce
 
-#import scipy.io as sio
 import time
 
 parser = argparse.ArgumentParser(description='PyTorch Super Res Example')

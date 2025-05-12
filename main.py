@@ -29,7 +29,6 @@ parser.add_argument('--upscale_factor', type=int, default=16, help="super resolu
 parser.add_argument('--batchSize', type=int, default=32, help='training batch size')
 parser.add_argument('--validBatchSize', type=int, default=1, help='validation batch size')
 parser.add_argument('--nEpochs', type=int, default=2000, help='number of epochs to train for')
-parser.add_argument('--snapshots', type=int, default=50, help='Snapshots')
 parser.add_argument('--start_iter', type=int, default=1, help='Starting Epoch')
 parser.add_argument('--lr', type=float, default=1e-4, help='Learning Rate. Default=0.01')
 parser.add_argument('--gpu_mode', type=bool, default=True)
@@ -52,7 +51,6 @@ parser.add_argument('--model', default='MIX2K_LR_aug_x4dl10DBPNITERtpami_epoch_3
 parser.add_argument('--pretrained', type=bool, default=True)
 parser.add_argument('--save_folder', default='weights/', help='Location to save checkpoint models')
 parser.add_argument('--prefix', default='1channel', help='Location to save checkpoint models')
-#parser.add_argument('--weight_decay', type=float, default=0.0001, help='Weight decay')
 
 opt = parser.parse_args()
 gpus_list = [i for i in range(opt.gpus)]
@@ -67,6 +65,13 @@ def setup(rank, world_size):
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
 
 def prepare_data(rank, world_size, num_workers=0):
+    '''
+    Prepare the training and validation data loaders.
+    :param rank: The rank of the current process.
+    :param world_size: The total number of processes.
+    :param num_workers: The number of workers for data loading.
+    :return: The training and validation data loaders.
+    '''
     train_set = get_training_set(opt.data_dir, opt.hr_train_dataset, opt.upscale_factor, opt.noise_level, True, opt.patch_size, opt.data_augmentation, opt.decimals, opt.quantize)
     sampler = DistributedSampler(train_set, num_replicas=world_size, rank=rank, shuffle=False, drop_last=False)
     training_data_loader = DataLoader(dataset=train_set, num_workers=num_workers, batch_size=opt.batchSize, shuffle=False, sampler=sampler)
@@ -78,51 +83,6 @@ def prepare_data(rank, world_size, num_workers=0):
 
 def cleanup():
     dist.destroy_process_group()
-
-def train(epoch, training_data_loader, criterion, optimizer, model):
-    epoch_loss = 0
-    training_data_loader.sampler.set_epoch(epoch)
-    
-    for iteration, batch in enumerate(training_data_loader, 1):
-        model.train()
-        input, target = Variable(batch[0]), Variable(batch[1])
-        if cuda:
-            input = input.cuda()
-
-        optimizer.zero_grad()
-        t0 = time.time()
-        prediction = model(input)
-        t_inter = time.time()
-
-        if cuda:
-            target = target.to(prediction.device)
-        loss = criterion(prediction, target)
-        t1 = time.time()
-        epoch_loss += loss.data
-        loss.backward()
-        optimizer.step()
-        
-        print("===> Epoch[{}]({}/{}): Loss: {:.4f} || Timer: {:.4f},{:.4f} sec.".format(epoch, iteration, len(training_data_loader), loss.data, (t_inter - t0),(t1 - t_inter)))
-
-    cleanup()
-
-    print("===> Epoch {} Training: Avg. Loss: {:.4f}".format(epoch, epoch_loss / len(training_data_loader)))
-#    print("===> Epoch {} Validation: Avg. Loss: {:.4f}".format(epoch, val_loss))
-#    return val_loss
-
-def test():
-    avg_psnr = 0
-    for batch in testing_data_loader:
-        input, target = Variable(batch[0]), Variable(batch[1])
-        if cuda:
-            input = input.cuda(gpus_list[0])
-            target = target.cuda(gpus_list[0])
-
-        prediction = model(input)
-        mse = criterion(prediction, target)
-        psnr = 10 * log10(1 / mse.data[0])
-        avg_psnr += psnr
-    print("===> Avg. PSNR: {:.4f} dB".format(avg_psnr / len(testing_data_loader)))
 
 def print_network(net):
     num_params = 0
@@ -164,8 +124,10 @@ if cuda:
 
 def main(rank, world_size):
     torch.cuda.set_device(rank)
+    # Setup process on each GPU
     setup(rank, world_size)
     
+    # Rank 0 is the main process and prints the logs
     if rank == 0:
         print('===> Loading datasets')
     training_data_loader, validation_data_loader = prepare_data(rank=rank, world_size=world_size, num_workers=0)
@@ -173,24 +135,26 @@ def main(rank, world_size):
     if rank == 0:
         print('===> Building model ', opt.model_type)
 
+    # Load the weights if the model is pretrained
     if opt.pretrained:
         model = DBPNLL(num_channels=1, base_filter=64,  feat = 256, num_stages=10, scale_factor=16, combination=opt.combination, tuning=True).to(rank)
         optimizer = optim.Adam(model.parameters(), lr=opt.lr, betas=(0.9, 0.999), eps=1e-8)
         model, optimizer, start_epoch = load_checkpoint(model, optimizer, rank)
         epoch_start = start_epoch
+    # If the model is not pretrained, create a new model
     else:
         model = DBPNLL(num_channels=1, base_filter=64,  feat = 256, num_stages=10, scale_factor=16, combination=opt.combination, tuning=True).to(rank)
         model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=True)
         optimizer = optim.Adam(model.parameters(), lr=opt.lr, betas=(0.9, 0.999), eps=1e-8)
         epoch_start = opt.start_iter
     
-    #criterion = nn.MSELoss()
     criterion = nn.L1Loss(reduction='none').to(rank)
 
     if rank == 0:
         print('---------- Networks architecture -------------')
         print_network(model)
         print('----------------------------------------------')
+    # Use mixed precision training
     scaler = GradScaler()
     i = 0
     best_val_loss = None
@@ -215,11 +179,12 @@ def main(rank, world_size):
                 loss = criterion(prediction, target)
                 loss = loss * mask
                 loss = loss.sum() / mask.sum()
+            # Scale the gradient for backpropagation
             scaler.scale(loss).backward()
+            # Unscale the gradients before optimization
             scaler.step(optimizer)
-
             scaler.update()
-
+        # Synchronize the loss across all processes
         loss_tensor = torch.tensor([loss.item()], device=rank)
         dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
 
@@ -238,6 +203,7 @@ def main(rank, world_size):
             val_loss_tensor = torch.tensor([loss_val.item()], device=rank)
             dist.all_reduce(val_loss_tensor, op=dist.ReduceOp.SUM)
 
+        # Adjust the learning rate halfway through training
         if (epoch+1) % (opt.nEpochs/2) == 0:
                 for param_group in optimizer.param_groups:
                     param_group['lr'] /= 2
@@ -249,10 +215,12 @@ def main(rank, world_size):
             t1 = time.time()
             print("===> Epoch {} Training: Avg. Train Loss: {:.4f}, Val Loss: {:.4f} || Timer: {:.4f}".format(epoch, average_loss, val_loss, t1 - t0))
 
+            # Save the model if the validation loss improves
             if best_val_loss is None or val_loss < best_val_loss:
                 print("Checkpoint at epoch {} || Val. Loss: {:.7f}".format(epoch, val_loss))
                 checkpoint(epoch, model, optimizer)
                 best_val_loss = val_loss
+            # Early stopping
             if i == opt.patience:
                 print('Loss stopped improving at epoch N: {}'.format(epoch))
                 break
@@ -262,33 +230,3 @@ def main(rank, world_size):
 if __name__ == '__main__':
     world_size = opt.gpus
     mp.spawn(main, args=(world_size,), nprocs=world_size, join=True)
-#valid_set = get_validation_set(opt.data_dir, opt.hr_valid_dataset, opt.upscale_factor)
-#validation_data_loader = DataLoader(dataset=valid_set, num_workers=opt.threads, batch_size=opt.validBatchSize, shuffle=False)
-
-#best_val_loss = 100000
-    #val_loss = train(epoch)
-    #if val_loss >= best_val_loss:
-    #    i += 1
-    #else:
-    #    i = 0
-    #    checkpoint(epoch)
-    #    best_val_loss = val_loss
-
-    # learning rate is decayed by a factor of 10 every half of total epochs
-        
-#    model.eval()
-#    with torch.no_grad():
-#        for iteration, batch in enumerate(validation_data_loader, 1):
-#            input, target= Variable(batch[0]), Variable(batch[1])
-#            if cuda:
-#                input = input.cuda(gpus_list[0])
-#                target = target.cuda(gpus_list[0])
-
-#            t0 = time.time()
-#            prediction = model(input)
-
-#            loss_val = criterion(prediction, target)
-#            t1 = time.time()
-#            epoch_val_loss += loss_val.data
-            
-#        val_loss = epoch_val_loss / len(validation_data_loader)
