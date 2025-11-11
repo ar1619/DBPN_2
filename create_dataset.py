@@ -91,23 +91,25 @@ def eval():
         save_file(sr_array, min_max[0].numpy(), name[0])
 
 def unnorm(img, min_max):
+    """
+    Unnormalize the image after super resolution
+    :param img: super resolved CO2 patch
+    :param min_max: min and max values of the original patch
+    :return: unnormalized patch
+    """
     for i in range(img.shape[0]):
         for j in range(img.shape[1]):
+            # max value is in min_max[i,j,1] and min_value is in min_max[i,j,0]
             img[i][j] = img[i][j] * (min_max[i,j,1] - min_max[i,j,0]) + min_max[i,j,0]
     return img
 
-def save_file(img, min_max, img_name):
-    unnorm_img = unnorm(img, min_max)
-    reconstructed_img = unslide(unnorm_img, strategie="mean")
-    save_dir=os.path.join(opt.output,opt.test_dataset)
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
-        
-    save_fn = save_dir +'/'+ img_name
-    return np.save(save_fn, reconstructed_img)
-
-
 def unslide(sr_array, strategie="mean"):
+    """
+    Reconstruct the image from the patches
+    :param sr_array: super resolved patches
+    :param strategie: mean or none
+    :return: reconstructed image
+    """
     mask = np.zeros((5792, 9328))
     reconstructed = np.zeros((5792, 9328))
     if strategie == "mean":
@@ -122,6 +124,16 @@ def unslide(sr_array, strategie="mean"):
             for j in range(sr_array.shape[1]):
                 reconstructed[i*480:i*480+512, j*464:j*464+512] = sr_array[i,j]
         return reconstructed[:5776,64:9280]
+
+def save_file(img, min_max, img_name):
+    unnorm_img = unnorm(img, min_max)
+    reconstructed_img = unslide(unnorm_img, strategie="mean")
+    save_dir=os.path.join(opt.output,opt.test_dataset)
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+        
+    save_fn = save_dir +'/'+ img_name
+    return np.save(save_fn, reconstructed_img)
 
 eval()
 

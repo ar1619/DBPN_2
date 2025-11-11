@@ -135,6 +135,12 @@ def augment(img_in, img_tar, flip_h=True, rot=True):
     return img_in, img_tar, info_aug
 
 def divide_into_windows(file):
+    """
+    Divide the input file into 32x32 patches with a stride of 30 
+    in the x direction (lon) and 29 in the y direction (lat).
+    :param file: input file
+    :return: processed windows and min_max values
+    """
     # rolling window function
     array = np.array(file['XCO2'][0,:,:])
     new_array = np.pad(array, ((0,1),(0,0)), 'symmetric')

@@ -19,4 +19,4 @@ nvidia-smi
 source /scratch_hive/ar1619/miniconda3/etc/profile.d/conda.sh
 conda activate gpu_current2
 
-srun python create_dataset.py --upscale_factor 16 --combination 2 --input_dir ../RDS/OCO-2/low_res --output ../RDS/ephemeral/ --test_dataset OCO-2 --model weights/new_loss_post_tuning.pth
+srun python create_dataset.py --upscale_factor 16 --combination 2 --input_dir ../RDS/OCO-2/low_res --output ../RDS/ephemeral/ --test_dataset OCO2 --model weights/new_loss_post_tuning.pth
